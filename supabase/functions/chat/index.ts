@@ -642,6 +642,16 @@ Deno.serve(async (req) => {
 
                 try {
                   const chunk = JSON.parse(data);
+
+                  // Detect OpenRouter error responses in the SSE stream
+                  if (chunk.error) {
+                    console.error('OpenRouter stream error:', chunk.error);
+                    throw new Error(
+                      chunk.error.message ||
+                        `OpenRouter error: ${JSON.stringify(chunk.error)}`,
+                    );
+                  }
+
                   const delta = chunk.choices?.[0]?.delta;
 
                   if (!delta) continue;
@@ -765,15 +775,26 @@ Deno.serve(async (req) => {
             }
           }
 
-          const { data: finalMessageData } = await supabaseClient
-            .from('messages')
-            .update({ content })
-            .eq('id', newMessageData.id)
-            .select()
-            .single()
-            .overrideTypes<{ content: Content; role: 'assistant' }>();
-          if (finalMessageData)
-            streamMessage(controller, finalMessageData as Message);
+          let finalMessageData: Message | null = null;
+          try {
+            const { data } = await supabaseClient
+              .from('messages')
+              .update({ content })
+              .eq('id', newMessageData.id)
+              .select()
+              .single()
+              .overrideTypes<{ content: Content; role: 'assistant' }>();
+            finalMessageData = data as Message | null;
+          } catch (dbError) {
+            console.error('Failed to update message in DB:', dbError);
+          }
+
+          // Always stream a final message — fall back to in-memory content
+          // if the DB update failed, so the client never gets an empty stream
+          streamMessage(
+            controller,
+            finalMessageData ?? ({ ...newMessageData, content } as Message),
+          );
           controller.close();
         }
 
