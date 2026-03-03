@@ -15,6 +15,7 @@ import {
   useUpdateMessageOptimisticMutation,
   useChangeRatingMutation,
 } from '@/services/messageService';
+import { useAuth } from '@/contexts/AuthContext';
 import Tree from '@shared/Tree';
 import { useRequestCancellation } from '@/hooks/useRequestCancellation';
 import posthog from 'posthog-js';
@@ -24,6 +25,7 @@ export function ParametricEditorView() {
   const { conversation, updateConversationAsync } = useConversation();
   const queryClient = useQueryClient();
   const { currentMessage, setCurrentMessage } = useCurrentMessage();
+  const { totalTokens } = useAuth();
   const [currentOutput, setCurrentOutput] = useState<Blob | undefined>();
   const [color, setColor] = useState('#00A6FF');
   const { cancelRequest } = useRequestCancellation();
@@ -201,7 +203,7 @@ export function ParametricEditorView() {
       fixError={currentMessage?.id === lastMessage?.id ? fixError : undefined}
       changeRating={changeRating}
       restoreMessage={restoreMessage}
-      limitReached={false} // Temporarily disabled for free to everyone
+      limitReached={totalTokens <= 0}
     />
   );
 }

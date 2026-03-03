@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Loader2, Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useManageSubscription } from '@/services/subscriptionService';
+import { useTokenPackPurchase } from '@/services/subscriptionService';
 import {
   Tooltip,
   TooltipContent,
@@ -19,9 +20,19 @@ import { Input } from '@/components/ui/input';
 import * as Sentry from '@sentry/react';
 import { useProfile, useUpdateProfile } from '@/services/profileService';
 import { AvatarUpdateDialog } from '@/components/auth/AvatarUpdateDialog';
+import { useTokenPacks } from '@/hooks/useTokenPacks';
+import { useTokenCosts } from '@/hooks/useTokenCosts';
 
 export default function SettingsView() {
-  const { subscription, generationsRemaining, user, resetPassword } = useAuth();
+  const {
+    subscription,
+    subscriptionTokens,
+    purchasedTokens,
+    totalTokens,
+    subscriptionTokenLimit,
+    user,
+    resetPassword,
+  } = useAuth();
   const { data: profile } = useProfile();
   const { mutate: updateProfile, isPending: isUpdateLoading } =
     useUpdateProfile();
@@ -29,8 +40,19 @@ export default function SettingsView() {
   const [newName, setNewName] = useState(profile?.full_name || '');
   const [editingName, setEditingName] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const { data: tokenPacks = [] } = useTokenPacks();
+  const { data: tokenCosts = [] } = useTokenCosts();
+  const {
+    mutate: purchaseTokenPack,
+    isPending: isPurchaseLoading,
+    variables: purchaseVariables,
+  } = useTokenPackPurchase();
 
-  const generationsUsed = 100 - generationsRemaining;
+  const subscriptionUsed = subscriptionTokenLimit - subscriptionTokens;
+  const usagePercent =
+    subscriptionTokenLimit > 0
+      ? (subscriptionUsed / subscriptionTokenLimit) * 100
+      : 0;
 
   useEffect(() => {
     if (editingName) {
@@ -248,104 +270,147 @@ export default function SettingsView() {
                 Billing
               </h2>
             </div>
-            <div className="col-span-3 grid grid-cols-3 items-center gap-4">
-              <div className="col-span-2 flex w-full flex-col gap-2">
-                {subscription === 'free' ? (
+            <div className="col-span-3 flex w-full flex-col gap-6">
+              {/* Subscription info */}
+              <div className="grid grid-cols-3 items-center gap-4">
+                <div className="col-span-2 flex w-full flex-col gap-2">
                   <div className="flex items-center gap-2 text-adam-neutral-50">
-                    <p className="text-sm font-medium">Adam Free</p>
+                    <p className="text-sm font-medium">
+                      {subscription === 'free'
+                        ? 'Adam Free'
+                        : subscription === 'standard'
+                          ? 'Adam Standard'
+                          : 'Adam Pro'}
+                    </p>
                     <Tooltip>
                       <TooltipTrigger>
                         <Info className="h-4 w-4" />
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>3 3D generations a day</p>
-                        <p>Conversational Edits</p>
-                        <p>Unlimited Parameter Edits</p>
+                        <p>{subscriptionTokenLimit} tokens per period</p>
+                        {tokenCosts.map((tc) => (
+                          <p key={tc.operation}>
+                            {tc.operation}: {tc.cost} tokens
+                          </p>
+                        ))}
                       </TooltipContent>
                     </Tooltip>
                   </div>
-                ) : subscription === 'standard' ? (
+
+                  {/* Token usage bar */}
                   <div className="flex w-full flex-col gap-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 text-adam-neutral-50">
-                        <p className="text-sm font-medium">Adam Standard</p>
-                        <Tooltip>
-                          <TooltipTrigger>
-                            <Info className="h-4 w-4" />
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>100 3D generations per month</p>
-                            <p>Conversational Edits</p>
-                            <p>Unlimited Parameter Edits</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <div className="text-xs text-adam-neutral-200">
-                        {generationsUsed} / 100
-                      </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-adam-neutral-200">
+                        Subscription tokens
+                      </span>
+                      <span className="text-xs text-adam-neutral-200">
+                        {subscriptionTokens} / {subscriptionTokenLimit}
+                      </span>
                     </div>
-                    {/* Progress bar showing generations remaining */}
                     <Progress
                       indicatorClassName={cn(
-                        generationsUsed < 70
+                        usagePercent < 70
                           ? 'bg-lime-500'
-                          : generationsUsed < 90
+                          : usagePercent < 90
                             ? 'bg-amber-500'
                             : 'bg-[#FB2C2C]',
                       )}
                       className={cn(
-                        generationsUsed < 70
+                        usagePercent < 70
                           ? 'bg-lime-800'
-                          : generationsUsed < 90
+                          : usagePercent < 90
                             ? 'bg-amber-800'
                             : 'bg-[#843535]',
                       )}
-                      max={100}
-                      value={generationsUsed}
+                      max={subscriptionTokenLimit}
+                      value={subscriptionUsed}
                     />
+
+                    {purchasedTokens > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-adam-neutral-200">
+                          Purchased tokens
+                        </span>
+                        <span className="text-xs text-adam-neutral-200">
+                          {purchasedTokens}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between border-t border-adam-neutral-700 pt-1">
+                      <span className="text-xs font-medium text-adam-neutral-50">
+                        Total available
+                      </span>
+                      <span className="text-xs font-medium text-adam-neutral-50">
+                        {totalTokens}
+                      </span>
+                    </div>
                   </div>
+                </div>
+
+                {subscription !== 'free' ? (
+                  <Button
+                    onClick={() => handleManageSubscription()}
+                    className="justify-self-end rounded-full font-light"
+                    variant="dark"
+                    disabled={isManageLoading}
+                  >
+                    {isManageLoading ? (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading...
+                      </div>
+                    ) : (
+                      'Manage'
+                    )}
+                  </Button>
                 ) : (
-                  <div className="flex items-center gap-2 text-adam-neutral-50">
-                    <p className="text-sm font-medium">Adam Pro</p>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <Info className="h-4 w-4" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Unlimited 3D generations per month</p>
-                        <p>Conversational Edits</p>
-                        <p>Unlimited Parameter Edits</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
+                  <Link to="/subscription" className="justify-self-end">
+                    <Button
+                      className="justify-self-end rounded-full font-light"
+                      variant="dark"
+                    >
+                      Upgrade
+                    </Button>
+                  </Link>
                 )}
               </div>
 
-              {subscription !== 'free' ? (
-                <Button
-                  onClick={() => handleManageSubscription()}
-                  className="justify-self-end rounded-full font-light"
-                  variant="dark"
-                  disabled={isManageLoading}
-                >
-                  {isManageLoading ? (
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Loading...
-                    </div>
-                  ) : (
-                    'Manage'
-                  )}
-                </Button>
-              ) : (
-                <Link to="/subscription" className="justify-self-end">
-                  <Button
-                    className="justify-self-end rounded-full font-light"
-                    variant="dark"
-                  >
-                    Upgrade
-                  </Button>
-                </Link>
+              {/* Buy Tokens section */}
+              {tokenPacks.length > 0 && (
+                <div className="flex flex-col gap-3">
+                  <div className="text-sm font-medium text-adam-neutral-50">
+                    Buy Tokens
+                  </div>
+                  <div className="text-xs text-adam-neutral-200">
+                    Purchased tokens never expire.
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    {tokenPacks.map((pack) => {
+                      const isThisPending =
+                        isPurchaseLoading &&
+                        purchaseVariables?.lookupKey === pack.stripe_lookup_key;
+                      return (
+                        <Button
+                          key={pack.id}
+                          variant="dark"
+                          className="rounded-full font-light"
+                          disabled={isPurchaseLoading}
+                          onClick={() =>
+                            purchaseTokenPack({
+                              lookupKey: pack.stripe_lookup_key,
+                            })
+                          }
+                        >
+                          {isThisPending && (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          )}
+                          {`${pack.token_amount} tokens - $${(pack.price_cents / 100).toFixed(2)}`}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
             </div>
           </div>

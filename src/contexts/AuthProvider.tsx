@@ -61,6 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { data: userExtraData, isLoading: isUserExtraDataLoading } = useQuery({
     queryKey: ['userExtraData'],
     enabled: !!user,
+    refetchInterval: 30000,
     queryFn: async () => {
       const { data, error } = await supabase.rpc('user_extradata', {
         user_id_input: user?.id ?? '',
@@ -72,22 +73,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
   });
 
-  // Set up real-time subscription for prompts table to update generationsRemaining immediately
+  // Set up real-time subscription for token_balances table to update tokens immediately
   useEffect(() => {
     if (!user) return;
 
     const channel = supabase
-      .channel('prompts-changes')
+      .channel('token-balances-changes')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'prompts',
+          table: 'token_balances',
           filter: `user_id=eq.${user.id}`,
         },
         () => {
-          // Invalidate userExtraData query immediately when prompts change
+          // Invalidate userExtraData query immediately when token balances change
           queryClient.invalidateQueries({ queryKey: ['userExtraData'] });
         },
       )
@@ -139,6 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               queryKey: ['meshData', payload.id],
             });
             queryClient.invalidateQueries({ queryKey: ['mesh', payload.id] });
+            queryClient.invalidateQueries({ queryKey: ['userExtraData'] });
 
             if (
               payload.status === 'success' &&
@@ -249,7 +251,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         hasTrialed: userExtraData?.hasTrialed ?? true,
         subscription: userExtraData?.sublevel ?? 'free',
-        generationsRemaining: userExtraData?.generationsRemaining ?? 0,
+        subscriptionTokens: userExtraData?.subscriptionTokens ?? 0,
+        purchasedTokens: userExtraData?.purchasedTokens ?? 0,
+        totalTokens: userExtraData?.totalTokens ?? 0,
+        subscriptionTokenLimit: userExtraData?.subscriptionTokenLimit ?? 50,
+        subscriptionExpiresAt: userExtraData?.subscriptionExpiresAt ?? null,
         // Consider auth loading, user data loading, and profile loading states
         isLoading:
           isLoading || (!!user && (isUserExtraDataLoading || isProfileLoading)),

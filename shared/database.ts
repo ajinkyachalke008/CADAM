@@ -7,31 +7,6 @@ export type Json =
   | Json[];
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never;
-    };
-    Views: {
-      [_ in never]: never;
-    };
-    Functions: {
-      graphql: {
-        Args: {
-          operationName?: string;
-          query?: string;
-          variables?: Json;
-          extensions?: Json;
-        };
-        Returns: Json;
-      };
-    };
-    Enums: {
-      [_ in never]: never;
-    };
-    CompositeTypes: {
-      [_ in never]: never;
-    };
-  };
   public: {
     Tables: {
       conversations: {
@@ -313,6 +288,123 @@ export type Database = {
         };
         Relationships: [];
       };
+      token_balances: {
+        Row: {
+          balance: number;
+          created_at: string;
+          expires_at: string | null;
+          id: string;
+          source: Database['public']['Enums']['token_source_type'];
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          balance?: number;
+          created_at?: string;
+          expires_at?: string | null;
+          id?: string;
+          source: Database['public']['Enums']['token_source_type'];
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          balance?: number;
+          created_at?: string;
+          expires_at?: string | null;
+          id?: string;
+          source?: Database['public']['Enums']['token_source_type'];
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      token_costs: {
+        Row: {
+          cost: number;
+          created_at: string;
+          operation: Database['public']['Enums']['token_operation_type'];
+          updated_at: string;
+        };
+        Insert: {
+          cost: number;
+          created_at?: string;
+          operation: Database['public']['Enums']['token_operation_type'];
+          updated_at?: string;
+        };
+        Update: {
+          cost?: number;
+          created_at?: string;
+          operation?: Database['public']['Enums']['token_operation_type'];
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      token_pack_products: {
+        Row: {
+          active: boolean;
+          created_at: string;
+          id: string;
+          name: string;
+          price_cents: number;
+          stripe_lookup_key: string;
+          token_amount: number;
+        };
+        Insert: {
+          active?: boolean;
+          created_at?: string;
+          id?: string;
+          name: string;
+          price_cents: number;
+          stripe_lookup_key: string;
+          token_amount: number;
+        };
+        Update: {
+          active?: boolean;
+          created_at?: string;
+          id?: string;
+          name?: string;
+          price_cents?: number;
+          stripe_lookup_key?: string;
+          token_amount?: number;
+        };
+        Relationships: [];
+      };
+      token_transactions: {
+        Row: {
+          amount: number;
+          created_at: string;
+          id: number;
+          operation: Database['public']['Enums']['token_operation_type'];
+          purchased_balance_after: number;
+          reference_id: string | null;
+          source: Database['public']['Enums']['token_source_type'];
+          subscription_balance_after: number;
+          user_id: string;
+        };
+        Insert: {
+          amount: number;
+          created_at?: string;
+          id?: never;
+          operation: Database['public']['Enums']['token_operation_type'];
+          purchased_balance_after: number;
+          reference_id?: string | null;
+          source: Database['public']['Enums']['token_source_type'];
+          subscription_balance_after: number;
+          user_id: string;
+        };
+        Update: {
+          amount?: number;
+          created_at?: string;
+          id?: never;
+          operation?: Database['public']['Enums']['token_operation_type'];
+          purchased_balance_after?: number;
+          reference_id?: string | null;
+          source?: Database['public']['Enums']['token_source_type'];
+          subscription_balance_after?: number;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       trial_users: {
         Row: {
           id: string;
@@ -333,22 +425,48 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      create_conversation_from_featured: {
-        Args: { featured_id_input: string; title_input: string };
-        Returns: string;
+      credit_purchased_tokens: {
+        Args: { p_amount: number; p_reference_id?: string; p_user_id: string };
+        Returns: Json;
       };
-      create_featured: {
+      deduct_tokens: {
         Args: {
-          conversation_id_input: string;
-          title_input: string;
-          description_input: string;
-          image_location_input: string;
+          p_operation: Database['public']['Enums']['token_operation_type'];
+          p_reference_id?: string;
+          p_user_id: string;
         };
-        Returns: string;
+        Returns: Json;
       };
+      get_subscription_token_limit: {
+        Args: { p_user_id: string };
+        Returns: number;
+      };
+      grant_subscription_tokens: {
+        Args: {
+          p_expires_at: string;
+          p_token_amount: number;
+          p_user_id: string;
+        };
+        Returns: Json;
+      };
+      refund_tokens: {
+        Args: {
+          p_operation: Database['public']['Enums']['token_operation_type'];
+          p_reference_id?: string;
+          p_user_id: string;
+        };
+        Returns: Json;
+      };
+      reset_free_tier_tokens: { Args: never; Returns: undefined };
       user_extradata: {
         Args: { user_id_input: string };
         Returns: Database['public']['CompositeTypes']['user_data'];
+        SetofOptions: {
+          from: '*';
+          to: 'user_data';
+          isOneToOne: true;
+          isSetofReturn: false;
+        };
       };
     };
     Enums: {
@@ -360,12 +478,18 @@ export type Database = {
       prompt_type: 'mesh' | 'image' | 'chat';
       'stripe-level': 'pro' | 'standard';
       subscription_level: 'pro' | 'standard' | 'free';
+      token_operation_type: 'mesh' | 'parametric' | 'chat' | 'refund';
+      token_source_type: 'subscription' | 'purchased';
     };
     CompositeTypes: {
       user_data: {
         hasTrialed: boolean | null;
         sublevel: Database['public']['Enums']['subscription_level'] | null;
-        generationsRemaining: number | null;
+        subscriptionTokens: number | null;
+        purchasedTokens: number | null;
+        totalTokens: number | null;
+        subscriptionTokenLimit: number | null;
+        subscriptionExpiresAt: string | null;
       };
     };
   };
@@ -492,9 +616,6 @@ export type CompositeTypes<
     : never;
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       'conversation-type': ['parametric', 'creative'],
@@ -505,6 +626,8 @@ export const Constants = {
       prompt_type: ['mesh', 'image', 'chat'],
       'stripe-level': ['pro', 'standard'],
       subscription_level: ['pro', 'standard', 'free'],
+      token_operation_type: ['mesh', 'parametric', 'chat', 'refund'],
+      token_source_type: ['subscription', 'purchased'],
     },
   },
 } as const;

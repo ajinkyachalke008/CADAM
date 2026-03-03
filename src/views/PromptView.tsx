@@ -21,7 +21,7 @@ import { useSendContentMutation } from '@/services/messageService';
 export function PromptView() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user, generationsRemaining, isLoading } = useAuth();
+  const { user, totalTokens, isLoading } = useAuth();
   const { isSidebarOpen } = useOutletContext<{ isSidebarOpen: boolean }>();
   const queryClient = useQueryClient();
 
@@ -50,19 +50,13 @@ export function PromptView() {
 
   const lowPrompts = useMemo(() => {
     if (isLoading) return false;
-    if (type === 'creative') {
-      return generationsRemaining <= 5;
-    }
-    return false;
-  }, [type, generationsRemaining, isLoading]);
+    return totalTokens > 0 && totalTokens <= 10;
+  }, [totalTokens, isLoading]);
 
   const limitReached = useMemo(() => {
     if (isLoading) return false;
-    if (type === 'creative') {
-      return generationsRemaining <= 0;
-    }
-    return false;
-  }, [type, generationsRemaining, isLoading]);
+    return totalTokens <= 0;
+  }, [totalTokens, isLoading]);
 
   const { mutate: sendMessage } = useSendContentMutation({
     conversation: {
@@ -262,9 +256,7 @@ export function PromptView() {
                 )}
                 {!isLoading && user && lowPrompts && !limitReached && (
                   <div className="absolute left-0 right-0 top-0">
-                    <LowPromptsWarningMessage
-                      promptsRemaining={generationsRemaining}
-                    />
+                    <LowPromptsWarningMessage tokensRemaining={totalTokens} />
                   </div>
                 )}
               </div>

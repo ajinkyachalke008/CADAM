@@ -11,7 +11,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Check } from 'lucide-react';
 import FreeTrialButton from '@/components/ui/FreeTrialButton';
 import { useSubscriptionService } from '@/services/subscriptionService';
-import { usePricingTest } from '@/hooks/usePricingTest';
 
 export function TrialDialog({
   open,
@@ -24,7 +23,6 @@ export function TrialDialog({
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { variant } = usePricingTest();
 
   const { mutate: createCheckoutSession, isPending } = useSubscriptionService();
 
@@ -34,13 +32,8 @@ export function TrialDialog({
       return;
     }
 
-    const lookupKey =
-      variant.id === 'variant_b' || variant.id === 'variant_c'
-        ? 'pro_monthly_variant'
-        : 'pro_monthly';
-
     createCheckoutSession({
-      lookupKey,
+      lookupKey: 'pro_monthly',
       trial: true,
       source: 'trial_dialog',
     });
@@ -77,7 +70,7 @@ export function TrialDialog({
           <li className="flex items-center gap-2">
             <Check className="h-4 w-4 text-adam-neutral-100" />
             <span className="text-adam-neutral-100">
-              Unlimited 3D Generations
+              5,000 tokens per month
             </span>
           </li>
           <li className="flex items-center gap-2">

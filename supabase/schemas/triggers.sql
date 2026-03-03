@@ -12,48 +12,21 @@ $$;
 
 CREATE OR REPLACE TRIGGER "update_leaf_trigger" AFTER INSERT ON "public"."messages" FOR EACH ROW EXECUTE FUNCTION "public"."update_conversation_leaf"();
 
--- Mesh prompt tracking triggers
--- These triggers automatically manage prompt entries for mesh generations
+-- Mesh token refund triggers
+-- Tokens are deducted before mesh creation now, refunded on failure
 
--- Function to handle mesh insert (add prompt immediately)
-CREATE OR REPLACE FUNCTION handle_mesh_insert()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Insert a prompt entry immediately when a mesh is created
-    INSERT INTO public.prompts (user_id, type)
-    VALUES (NEW.user_id, 'mesh');
-    
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Function to handle mesh status updates (clean up on failure)
+-- Function to handle mesh status updates (refund tokens on failure)
 CREATE OR REPLACE FUNCTION handle_mesh_status_update()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- If mesh status changed to 'failure', remove the most recent mesh prompt for this user
+    -- If mesh status changed to 'failure', refund the tokens
     IF OLD.status != 'failure' AND NEW.status = 'failure' THEN
-        DELETE FROM public.prompts 
-        WHERE user_id = NEW.user_id 
-          AND type = 'mesh' 
-          AND id = (
-              SELECT id FROM public.prompts 
-              WHERE user_id = NEW.user_id 
-                AND type = 'mesh' 
-              ORDER BY created_at DESC 
-              LIMIT 1
-          );
+        PERFORM public.refund_tokens(NEW.user_id, 'mesh'::public.token_operation_type, NEW.id::text);
     END IF;
-    
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Create trigger for mesh insertion
-CREATE OR REPLACE TRIGGER mesh_insert_prompt_trigger
-    AFTER INSERT ON public.meshes
-    FOR EACH ROW
-    EXECUTE FUNCTION handle_mesh_insert();
 
 -- Create trigger for mesh status updates
 CREATE OR REPLACE TRIGGER mesh_status_update_trigger
@@ -94,6 +67,15 @@ BEGIN
       split_part(NEW.email, '@', 1)
     )
   );
+
+  -- Initialize subscription token balance (free tier: 50 tokens, 1-day expiry)
+  INSERT INTO public.token_balances (user_id, source, balance, expires_at)
+  VALUES (NEW.id, 'subscription'::public.token_source_type, 50, now() + interval '1 day');
+
+  -- Initialize purchased token balance (0)
+  INSERT INTO public.token_balances (user_id, source, balance)
+  VALUES (NEW.id, 'purchased'::public.token_source_type, 0);
+
   RETURN NEW;
 END;
 $$;

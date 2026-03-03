@@ -1,6 +1,6 @@
 // Setup type definitions for built-in Supabase Runtime APIs
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
-import Stripe from 'npm:stripe@17.5.0';
+import '@supabase/functions-js/edge-runtime.d.ts';
+import Stripe from 'stripe';
 import { corsHeaders } from '../_shared/cors.ts';
 import { getAnonSupabaseClient } from '../_shared/supabaseClient.ts';
 import { initSentry, logError, logApiError } from '../_shared/sentry.ts';

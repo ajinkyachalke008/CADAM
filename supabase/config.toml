@@ -32,10 +32,6 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
-[functions.images]
-enabled = true
-verify_jwt = true
-
 [functions.mesh]
 enabled = true
 verify_jwt = true
@@ -66,6 +62,15 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/creative-chat/deno.json"
 entrypoint = "./functions/creative-chat/index.ts"
+
+[storage.buckets.meshes]
+public = false
+
+[storage.buckets.images]
+public = false
+
+[storage.buckets.previews]
+public = false
 
 [db.migrations]
 schema_paths = [

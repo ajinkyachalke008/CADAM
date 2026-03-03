@@ -8,7 +8,11 @@ interface AuthContextType {
   user: User | null;
   hasTrialed: boolean;
   subscription: Subscription;
-  generationsRemaining: number;
+  subscriptionTokens: number;
+  purchasedTokens: number;
+  totalTokens: number;
+  subscriptionTokenLimit: number;
+  subscriptionExpiresAt: string | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string) => Promise<void>;

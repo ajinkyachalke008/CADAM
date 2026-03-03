@@ -53,6 +53,46 @@ export const useSubscriptionService = () => {
   return subscriptionMutation;
 };
 
+export const useTokenPackPurchase = () => {
+  const { toast } = useToast();
+
+  const tokenPackMutation = useMutation({
+    mutationFn: async ({ lookupKey }: { lookupKey: string }) => {
+      posthog.capture('token_pack_purchase_clicked', {
+        price_id: lookupKey,
+      });
+      const { data, error } = await supabase.functions.invoke(
+        'stripe-create-checkout-session',
+        {
+          body: {
+            lookupKey,
+            mode: 'token_pack',
+          },
+        },
+      );
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (data) => {
+      window.location.href = data.url;
+    },
+    onError: (error, variables) => {
+      Sentry.captureException(error, {
+        extra: {
+          variables,
+        },
+      });
+      toast({
+        title: 'Error',
+        description: 'Failed to start token purchase. Please try again.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  return tokenPackMutation;
+};
+
 export const useManageSubscription = () => {
   const { toast } = useToast();
 

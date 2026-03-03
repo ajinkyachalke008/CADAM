@@ -1,5 +1,7 @@
 {
   "imports": {
-    "@shared/": "../../../shared/"
+    "@shared/": "../../../shared/",
+    "@supabase/functions-js/edge-runtime.d.ts": "jsr:@supabase/functions-js@^2/edge-runtime.d.ts",
+    "stripe": "npm:stripe@17.5.0"
   }
 }

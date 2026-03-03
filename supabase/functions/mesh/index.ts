@@ -213,42 +213,56 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { data: userExtraData, error: userExtraDataError } =
-      await supabaseClient.rpc('user_extradata', {
-        user_id_input: userData.user.id,
-      });
+    // Deduct tokens for mesh operation using service role client
+    const serviceClient = getServiceRoleSupabaseClient();
+    const { data: rawTokenResult, error: tokenError } = await serviceClient.rpc(
+      'deduct_tokens',
+      {
+        p_user_id: userData.user.id,
+        p_operation: 'mesh',
+      },
+    );
 
-    if (userExtraDataError) {
-      logError(userExtraDataError, {
+    const tokenResult = rawTokenResult as {
+      success: boolean;
+      tokensRequired?: number;
+      tokensAvailable?: number;
+    } | null;
+
+    if (tokenError || !tokenResult) {
+      logError(tokenError ?? new Error('Token deduction returned null'), {
         functionName: 'mesh',
-        statusCode: 401,
+        statusCode: 500,
         userId: userData.user?.id,
       });
       return new Response(
-        JSON.stringify({ error: { message: userExtraDataError.message } }),
+        JSON.stringify({
+          error: { message: tokenError?.message ?? 'Token deduction failed' },
+        }),
         {
-          status: 401,
+          status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         },
       );
     }
 
-    if (
-      !userExtraData.generationsRemaining ||
-      userExtraData.generationsRemaining <= 0
-    ) {
-      logError(new Error('No generations remaining'), {
+    if (!tokenResult.success) {
+      logError(new Error('Insufficient tokens'), {
         functionName: 'mesh',
         statusCode: 402,
         userId: userData.user?.id,
         additionalContext: {
-          generationsRemaining: userExtraData.generationsRemaining,
+          tokensRequired: tokenResult.tokensRequired,
+          tokensAvailable: tokenResult.tokensAvailable,
         },
       });
       return new Response(
         JSON.stringify({
           error: {
-            message: 'No generations remaining',
+            message: 'insufficient_tokens',
+            code: 'insufficient_tokens',
+            tokensRequired: tokenResult.tokensRequired,
+            tokensAvailable: tokenResult.tokensAvailable,
           },
         }),
         {
