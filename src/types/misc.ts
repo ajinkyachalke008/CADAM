@@ -1,4 +1,4 @@
-import { Content, Conversation, Model } from '@shared/types';
+import { Content, Conversation, MeshFileType, Model } from '@shared/types';
 
 // Type for conversations with messages (used in HistoryView)
 export type HistoryConversation = Omit<
@@ -15,6 +15,8 @@ export interface ModelConfig {
   id: Model;
   name: string;
   description: string;
+  disabled?: boolean;
+  timeEstimate?: string;
   provider?: string;
   supportsTools?: boolean;
   supportsThinking?: boolean;
@@ -25,17 +27,6 @@ export interface MessageItem {
   id: string;
   isUploading?: boolean;
   url?: string;
-  source: 'upload' | 'selection' | 'mesh-render';
-  // For mesh renders, track which mesh they belong to
-  meshId?: string;
-}
-
-export interface MeshUploadState {
-  id: string;
-  filename: string; // Original filename for display/reference
-  boundingBox: { x: number; y: number; z: number };
-  renderIds: string[];
-  isProcessing: boolean;
-  // The actual STL file content for OpenSCAD import
-  fileContent: Blob;
+  source: 'upload' | 'selection';
+  fileType?: MeshFileType;
 }

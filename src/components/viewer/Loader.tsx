@@ -1,4 +1,6 @@
+import Lottie from 'lottie-react';
 import { useEffect, useRef, useState } from 'react';
+import adamLoading from '@/assets/adam-loading.json';
 
 type Props = {
   message?: string;
@@ -59,9 +61,11 @@ const Loader = ({ message }: Props) => {
   return (
     <div className="flex flex-col items-center justify-center">
       <div className="relative h-32 w-32">
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="h-16 w-16 animate-spin rounded-full border-4 border-adam-neutral-800 border-t-adam-blue" />
-        </div>
+        <Lottie
+          animationData={adamLoading}
+          loop={true}
+          style={{ width: '100%', height: '100%' }}
+        />
       </div>
       {message && (
         <p

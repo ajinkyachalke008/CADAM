@@ -1,10 +1,17 @@
+import { sentryVitePlugin } from '@sentry/vite-plugin';
 import path from 'path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
   base: '/cadam',
-  plugins: [react()],
+  plugins: [
+    react(),
+    sentryVitePlugin({
+      org: 'adamcad',
+      project: 'adamcad',
+    }),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -36,6 +43,6 @@ export default defineConfig({
     open: false,
   },
   optimizeDeps: {
-    exclude: ['@zip.js/zip.js', 'three', 'three-stdlib'],
+    exclude: ['@zip.js/zip.js', 'three', 'three-stdlib', '@sentry/vite-plugin'],
   },
 });

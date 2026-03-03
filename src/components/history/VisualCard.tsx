@@ -8,6 +8,7 @@ import {
   Pencil,
   Box,
   Loader2,
+  LockKeyhole,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -28,7 +29,8 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { formatDistanceToNow } from 'date-fns';
-import { HistoryConversation } from '@/types/misc';
+import { HistoryConversation } from '../../types/misc.ts';
+import { GoodEarth } from '../icons/ui/GoodEarth';
 import { supabase } from '@/lib/supabase';
 import { useOpenSCAD } from '@/hooks/useOpenSCAD';
 import { Canvas } from '@react-three/fiber';
@@ -45,6 +47,10 @@ interface VisualCardProps {
   conversation: HistoryConversation;
   onDelete: (conversationId: string) => void;
   onRename: (conversationId: string, newTitle: string) => void;
+  onTogglePrivacy: (
+    conversationId: string,
+    newPrivacy: 'public' | 'private',
+  ) => void;
 }
 
 function ThreePreview({ geometry }: { geometry: BufferGeometry }) {
@@ -92,6 +98,7 @@ export function VisualCard({
   conversation,
   onDelete,
   onRename,
+  onTogglePrivacy,
 }: VisualCardProps) {
   const [artifactCode, setArtifactCode] = useState<string | null>(null);
   const [geometry, setGeometry] = useState<BufferGeometry | null>(null);
@@ -228,9 +235,16 @@ export function VisualCard({
         </div>
 
         <div className="p-4">
-          <h3 className="mb-2 line-clamp-2 text-base font-medium text-adam-neutral-50">
-            {conversation.title}
-          </h3>
+          <div className="mb-2 flex items-center gap-2">
+            <h3 className="line-clamp-2 text-base font-medium text-adam-neutral-50">
+              {conversation.title}
+            </h3>
+            {conversation.privacy === 'public' ? (
+              <GoodEarth className="h-3.5 w-3.5 shrink-0 text-adam-neutral-400" />
+            ) : (
+              <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-adam-neutral-400" />
+            )}
+          </div>
           <div className="flex items-center gap-3 text-xs text-adam-neutral-400">
             <span className="flex items-center">
               <Clock className="mr-1 h-3 w-3" />
@@ -269,6 +283,29 @@ export function VisualCard({
                 <Pencil className="mr-2 h-4 w-4" />
                 Rename
               </DropdownMenuItem>
+              {conversation.privacy === 'private' ? (
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTogglePrivacy(conversation.id, 'public');
+                  }}
+                  className="text-adam-neutral-50 hover:cursor-pointer hover:bg-adam-neutral-950 focus:bg-adam-neutral-950"
+                >
+                  <GoodEarth className="mr-2 h-4 w-4" />
+                  Make Public
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTogglePrivacy(conversation.id, 'private');
+                  }}
+                  className="text-adam-neutral-50 hover:cursor-pointer hover:bg-adam-neutral-950 focus:bg-adam-neutral-950"
+                >
+                  <LockKeyhole className="mr-2 h-4 w-4" />
+                  Make Private
+                </DropdownMenuItem>
+              )}
               <AlertDialogTrigger asChild onClick={(e) => e.stopPropagation()}>
                 <DropdownMenuItem className="text-adam-neutral-50 hover:cursor-pointer hover:bg-adam-neutral-950 hover:text-red-500 focus:bg-adam-neutral-950 focus:text-red-500">
                   <Trash2 className="mr-2 h-4 w-4" />

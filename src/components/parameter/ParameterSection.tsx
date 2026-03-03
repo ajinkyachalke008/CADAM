@@ -2,7 +2,7 @@ import { RefreshCcw, Download, ChevronUp } from 'lucide-react';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Parameter } from '@shared/types';
+import { Message, Parameter } from '@shared/types';
 import {
   Tooltip,
   TooltipContent,
@@ -20,14 +20,23 @@ import { ColorPicker } from '@/components/parameter/ColorPicker';
 import { validateParameterValue } from '@/utils/parameterUtils';
 import { useCurrentMessage } from '@/contexts/CurrentMessageContext';
 import { downloadSTLFile, downloadOpenSCADFile } from '@/utils/downloadUtils';
-import { useChangeParameters } from '@/services/messageService';
-import { useBlob } from '@/contexts/BlobContext';
 
-export function ParameterSection() {
-  const { blob } = useBlob();
-  const changeParameters = useChangeParameters();
+interface ParameterSectionProps {
+  parameters: Parameter[];
+  onSubmit: (message: Message | null, parameters: Parameter[]) => void;
+  currentOutput?: Blob;
+  color: string;
+  setColor: (color: string) => void;
+}
+
+export function ParameterSection({
+  parameters,
+  onSubmit,
+  currentOutput,
+  color,
+  setColor,
+}: ParameterSectionProps) {
   const { currentMessage } = useCurrentMessage();
-  const parameters = currentMessage?.content.artifact?.parameters ?? [];
   const [selectedFormat, setSelectedFormat] = useState<'stl' | 'scad'>('stl');
 
   // Debounce timer for compilation
@@ -57,12 +66,12 @@ export function ParameterSection() {
       // Set new debounced timer (200ms delay)
       debounceTimerRef.current = setTimeout(() => {
         if (pendingParametersRef.current) {
-          changeParameters(currentMessage, pendingParametersRef.current);
+          onSubmit(currentMessage, pendingParametersRef.current);
           pendingParametersRef.current = null;
         }
       }, 200);
     },
-    [changeParameters, currentMessage],
+    [onSubmit, currentMessage],
   );
 
   const handleCommit = (param: Parameter, value: Parameter['value']) => {
@@ -85,8 +94,8 @@ export function ParameterSection() {
   };
 
   const handleDownloadSTL = () => {
-    if (!blob) return;
-    downloadSTLFile(blob, currentMessage);
+    if (!currentOutput) return;
+    downloadSTLFile(currentOutput, currentMessage);
   };
 
   const handleDownloadOpenSCAD = () => {
@@ -95,7 +104,9 @@ export function ParameterSection() {
   };
 
   const isDownloadDisabled =
-    selectedFormat === 'stl' ? !blob : !currentMessage?.content.artifact?.code;
+    selectedFormat === 'stl'
+      ? !currentOutput
+      : !currentMessage?.content.artifact?.code;
 
   return (
     <div className="h-full w-full max-w-full border-l border-gray-200/20 bg-adam-bg-secondary-dark dark:border-gray-800">
@@ -117,7 +128,7 @@ export function ParameterSection() {
                     ...param,
                     value: param.defaultValue,
                   }));
-                  changeParameters(currentMessage, newParameters);
+                  onSubmit(currentMessage, newParameters);
                 }}
               >
                 <RefreshCcw className="h-4 w-4" />
@@ -143,7 +154,7 @@ export function ParameterSection() {
         </ScrollArea>
         <div className="flex flex-col gap-4 border-t border-adam-neutral-700 px-6 py-6">
           <div>
-            <ColorPicker />
+            <ColorPicker color={color} onChange={setColor} />
           </div>
           <div className="flex">
             <Button
@@ -158,7 +169,9 @@ export function ParameterSection() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
-                  disabled={!blob && !currentMessage?.content.artifact?.code}
+                  disabled={
+                    !currentOutput && !currentMessage?.content.artifact?.code
+                  }
                   aria-label="select download format"
                   className="h-12 w-12 rounded-l-none border-l border-adam-neutral-300 bg-adam-neutral-50 p-0 text-adam-neutral-800 hover:bg-adam-neutral-100 hover:text-adam-neutral-900"
                 >
@@ -171,7 +184,7 @@ export function ParameterSection() {
               >
                 <DropdownMenuItem
                   onClick={() => setSelectedFormat('stl')}
-                  disabled={!blob}
+                  disabled={!currentOutput}
                   className="cursor-pointer text-adam-text-primary"
                 >
                   <span className="text-sm">.STL</span>

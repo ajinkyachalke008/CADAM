@@ -10,8 +10,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Content, Conversation } from '@shared/types';
-import { HistoryConversation } from '@/types/misc';
+import * as Sentry from '@sentry/react';
+import { Content, Conversation, ConversationSettings } from '@shared/types';
+import { HistoryConversation } from '../types/misc.ts';
 import { ConversationCard } from '@/components/history/ConversationCard';
 import { VisualCard } from '@/components/history/VisualCard';
 import { RenameDialogDrawer } from '@/components/history/RenameDialogDrawer';
@@ -48,7 +49,8 @@ export function HistoryView() {
           .eq('user_id', user?.id ?? '')
           .order('updated_at', { ascending: false })
           .order('created_at', { ascending: false })
-          .limit(1, { referencedTable: 'first_message' });
+          .limit(1, { referencedTable: 'first_message' })
+          .overrideTypes<Array<{ settings: ConversationSettings }>>();
 
       if (conversationsError) throw conversationsError;
 
@@ -186,6 +188,56 @@ export function HistoryView() {
       toast({
         title: 'Error',
         description: 'Failed to rename conversation',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const togglePrivacy = useMutation({
+    mutationFn: async ({
+      conversationId,
+      newPrivacy,
+    }: {
+      conversationId: string;
+      newPrivacy: 'public' | 'private';
+    }) => {
+      const { error } = await supabase
+        .from('conversations')
+        .update({ privacy: newPrivacy })
+        .eq('id', conversationId);
+
+      if (error) throw error;
+    },
+    onMutate: async ({ conversationId, newPrivacy }) => {
+      await queryClient.cancelQueries({ queryKey: ['conversations'] });
+      const previousConversations = queryClient.getQueryData(['conversations']);
+      queryClient.setQueryData(
+        ['conversations'],
+        (old: HistoryConversation[]) =>
+          old.map((conv) =>
+            conv.id === conversationId
+              ? { ...conv, privacy: newPrivacy }
+              : conv,
+          ),
+      );
+      return { previousConversations };
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      toast({
+        title: 'Success',
+        description: `Conversation is now ${variables.newPrivacy === 'public' ? 'public' : 'private'}`,
+      });
+    },
+    onError: (error: unknown, _variables, context) => {
+      console.error('Error toggling privacy:', error);
+      queryClient.setQueryData(
+        ['conversations'],
+        context?.previousConversations,
+      );
+      toast({
+        title: 'Error',
+        description: 'Failed to change conversation privacy',
         variant: 'destructive',
       });
     },
@@ -337,6 +389,12 @@ export function HistoryView() {
                       setNewTitle(title);
                       setOpen(true);
                     }}
+                    onTogglePrivacy={(id, privacy) =>
+                      togglePrivacy.mutate({
+                        conversationId: id,
+                        newPrivacy: privacy,
+                      })
+                    }
                   />
                 ))}
               </div>
@@ -352,7 +410,7 @@ export function HistoryView() {
                       'MMMM d, yyyy',
                     );
                   } catch (error) {
-                    console.error(error);
+                    Sentry.captureException(error, { extra: { date } });
                   }
 
                   return (
@@ -373,6 +431,12 @@ export function HistoryView() {
                               setNewTitle(title);
                               setOpen(true);
                             }}
+                            onTogglePrivacy={(id, privacy) =>
+                              togglePrivacy.mutate({
+                                conversationId: id,
+                                newPrivacy: privacy,
+                              })
+                            }
                             isEditing={!!editingConversation}
                           />
                         ))}

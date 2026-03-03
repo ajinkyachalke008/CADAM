@@ -1,10 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import posthog from 'posthog-js';
 import { AuthContext } from './AuthContext';
 
-// Redirect back to current page after OAuth
-const getRedirectUrl = () => window.location.origin + window.location.pathname;
+const ensurePermission = async () => {
+  if (typeof window === 'undefined' || !('Notification' in window)) {
+    return false;
+  }
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  const perm = await Notification.requestPermission();
+  return perm === 'granted';
+};
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(
@@ -12,61 +22,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Handle OAuth errors from redirect (e.g., identity_already_exists)
-  useEffect(() => {
-    const pendingLinkProvider = sessionStorage.getItem('pending_link_identity');
-    if (!pendingLinkProvider) return;
-
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const error = hashParams.get('error');
-    const error_code = hashParams.get('error_code');
-
-    // Clear the pending flag regardless of outcome
-    sessionStorage.removeItem('pending_link_identity');
-
-    if (error === 'server_error' && error_code === 'identity_already_exists') {
-      // Clear the hash from URL
-      window.history.replaceState(
-        null,
-        '',
-        window.location.pathname + window.location.search,
-      );
-      // The identity exists on another account, so sign in instead of linking
-      supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: getRedirectUrl() },
-      });
-    }
-  }, []);
-
-  // Clean up empty hash from URL after OAuth redirect
-  useEffect(() => {
-    if (window.location.hash === '#' || window.location.hash === '') {
-      window.history.replaceState(
-        null,
-        '',
-        window.location.pathname + window.location.search,
-      );
-    }
-  }, []);
+  const navigate = useNavigate();
+  const posthogSent = useRef(false);
+  const queryClient = useQueryClient();
 
   // Initialize auth state and set up session listener
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        let session = null;
         const {
-          data: { session: refreshedSession },
+          data: { session },
         } = await supabase.auth.refreshSession();
-        if (!refreshedSession) {
-          const {
-            data: { session: newSession },
-          } = await supabase.auth.signInAnonymously();
-          session = newSession;
-        } else {
-          session = refreshedSession;
-        }
         setSession(session);
         localStorage.setItem('session', JSON.stringify(session));
         setUser(session?.user ?? null);
@@ -79,78 +45,182 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       localStorage.setItem('session', JSON.stringify(session));
       setUser(session?.user ?? null);
+      if (event === 'PASSWORD_RECOVERY') {
+        navigate('/update-password');
+      }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [navigate]);
+
+  // Fetch user's subscription and usage data when user is available
+  const { data: userExtraData, isLoading: isUserExtraDataLoading } = useQuery({
+    queryKey: ['userExtraData'],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('user_extradata', {
+        user_id_input: user?.id ?? '',
+      });
+
+      if (error) throw error;
+
+      return data;
+    },
+  });
+
+  // Set up real-time subscription for prompts table to update generationsRemaining immediately
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('prompts-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'prompts',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          // Invalidate userExtraData query immediately when prompts change
+          queryClient.invalidateQueries({ queryKey: ['userExtraData'] });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, queryClient]);
+
+  // Fetch user's profile data directly (avoiding circular dependency)
+  const { data: profile, isLoading: isProfileLoading } = useQuery({
+    queryKey: ['profile', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', user?.id || '')
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user?.id,
+  });
+
+  // Initialize notifications preference once on first render after profile loads
+  useEffect(() => {
+    if (profile?.notifications_enabled) void ensurePermission();
+  }, [profile?.notifications_enabled]);
+
+  // Set up real-time subscription for meshes table to update meshData immediately and notify the user
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    // Supabase realtime
+    const channel = supabase
+      .channel(`mesh-updates-${user.id}`)
+      .on(
+        'broadcast',
+        {
+          event: 'mesh-updated',
+        },
+        async ({ payload }) => {
+          if (payload.kind === 'mesh') {
+            queryClient.invalidateQueries({
+              queryKey: ['meshData', payload.id],
+            });
+            queryClient.invalidateQueries({ queryKey: ['mesh', payload.id] });
+
+            if (
+              payload.status === 'success' &&
+              profile?.notifications_enabled &&
+              !window.location.pathname.includes(
+                `/editor/${payload.conversation_id}`,
+              )
+            ) {
+              if (await ensurePermission()) {
+                const notification = new Notification('3D model is ready', {
+                  body: 'Your generated 3D model has finished. Click to open.',
+                  icon: `${import.meta.env.BASE_URL}/Adam-Logo.png`,
+                });
+                notification.onclick = () => {
+                  window.focus();
+                  navigate(`/editor/${payload.conversation_id}`);
+                  notification.close();
+                };
+              }
+            }
+          }
+
+          if (payload.kind === 'preview') {
+            queryClient.invalidateQueries({
+              queryKey: ['preview', payload.id],
+            });
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, queryClient, navigate, profile?.notifications_enabled]);
+
+  // Track user in PostHog once we have all their data
+  useEffect(() => {
+    if (
+      user &&
+      !posthogSent.current &&
+      !isUserExtraDataLoading &&
+      !isProfileLoading
+    ) {
+      posthog.identify(user.id, {
+        email: user.email,
+        full_name: profile?.full_name,
+        subscription: userExtraData?.sublevel ?? 'free',
+        has_trialed: userExtraData?.hasTrialed ?? false,
+      });
+      posthogSent.current = true;
+    }
+  }, [user, isUserExtraDataLoading, userExtraData, profile, isProfileLoading]);
+
+  const signIn = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) throw error;
+  };
+
+  const signUp = async (email: string, password: string, name: string) => {
+    const { error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: name } },
+    });
+    if (signUpError) throw signUpError;
+  };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setSession(null);
-    setUser(null);
-    localStorage.removeItem('session');
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
   };
 
-  const signInWithEmail = async (email: string) => {
-    // Check if we have an anonymous session to upgrade
-    const {
-      data: { user: currentUser },
-    } = await supabase.auth.getUser();
-
-    const redirectTo = getRedirectUrl();
-
-    if (currentUser?.is_anonymous) {
-      // Try to add email to anonymous user
-      const { error } = await supabase.auth.updateUser(
-        { email },
-        { emailRedirectTo: redirectTo },
-      );
-      if (error) {
-        if (error.code === 'email_exists') {
-          // Email belongs to another account, send OTP to sign in
-          await supabase.auth.signInWithOtp({
-            email,
-            options: { emailRedirectTo: redirectTo },
-          });
-        } else {
-          throw error;
-        }
-      }
-    } else {
-      // No anonymous session, just send OTP
-      await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: redirectTo },
-      });
-    }
-  };
-
-  const signInWithGoogle = async () => {
-    const {
-      data: { user: currentUser },
-    } = await supabase.auth.getUser();
-
-    const redirectTo = getRedirectUrl();
-
-    if (currentUser?.is_anonymous) {
-      // Track that we're attempting to link, so we can handle errors on redirect
-      sessionStorage.setItem('pending_link_identity', 'google');
-      // Link identity to upgrade anonymous user
-      await supabase.auth.linkIdentity({
-        provider: 'google',
-        options: { redirectTo },
-      });
-    } else {
-      // No anonymous session, do regular OAuth
-      await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo },
-      });
-    }
+  const signInWithMagicLink = async (email: string) => {
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: true },
+    });
+    if (error) throw error;
   };
 
   const verifyOtp = async (email: string, token: string) => {
@@ -159,17 +229,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token,
       type: 'email',
     });
-    if (error) {
-      // try email change if this is a new user
-      const { error: emailChangeError } = await supabase.auth.verifyOtp({
-        email,
-        token,
-        type: 'email_change',
-      });
-      if (emailChangeError) {
-        throw emailChangeError;
-      }
-    }
+    if (error) throw error;
+  };
+
+  const resetPassword = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    if (error) throw error;
+  };
+
+  const updatePassword = async (password: string) => {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
   };
 
   return (
@@ -177,11 +247,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         session,
         user,
-        isLoading,
-        signOut,
-        signInWithEmail,
-        signInWithGoogle,
+        hasTrialed: userExtraData?.hasTrialed ?? true,
+        subscription: userExtraData?.sublevel ?? 'free',
+        generationsRemaining: userExtraData?.generationsRemaining ?? 0,
+        // Consider auth loading, user data loading, and profile loading states
+        isLoading:
+          isLoading || (!!user && (isUserExtraDataLoading || isProfileLoading)),
+        signIn,
+        signUp,
+        signInWithMagicLink,
         verifyOtp,
+        signOut,
+        resetPassword,
+        updatePassword,
       }}
     >
       {children}

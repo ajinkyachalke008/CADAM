@@ -1,23 +1,15 @@
-import { useConversation } from '@/services/conversationService';
+import { useConversation } from '@/contexts/ConversationContext';
 import { supabase } from '@/lib/supabase';
-import {
-  Content,
-  Conversation,
-  Message,
-  Model,
-  Parameter,
-} from '@shared/types';
-import { HistoryConversation } from '@/types/misc';
+import { Content, Conversation, Message, Model } from '@shared/types';
+import { HistoryConversation } from '../types/misc.ts';
 import {
   QueryClient,
-  useIsMutating,
+  UseMutateAsyncFunction,
   useMutation,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import { updateParameter } from '@/utils/parameterUtils';
-import { useCallback } from 'react';
-import { PARAMETRIC_MODELS } from '@/lib/utils';
+import * as Sentry from '@sentry/react';
 
 function messageSentConversationUpdate(
   newMessage: Message,
@@ -55,13 +47,10 @@ function messageInsertedConversationUpdate(
   // Update the current conversation optimistically
   queryClient.setQueryData(
     ['conversation', conversationId],
-    (oldConversation: Conversation | undefined) => {
-      if (!oldConversation) return oldConversation;
-      return {
-        ...oldConversation,
-        current_message_leaf_id: newMessage.id,
-      };
-    },
+    (oldConversation: Conversation) => ({
+      ...oldConversation,
+      current_message_leaf_id: newMessage.id,
+    }),
   );
 
   // Update messages optimistically
@@ -139,13 +128,18 @@ export function useInsertMessageMutation() {
         newMessage.conversation_id,
       );
     },
-    onError(error) {
-      console.error(error);
+    onError(error, message) {
+      Sentry.captureException(error, {
+        extra: {
+          hook: 'useInsertMessageMutation',
+          message,
+        },
+      });
     },
   });
 }
 
-export function useParametricChatMutation({
+export function useCreativeChatMutation({
   conversationId,
 }: {
   conversationId: string;
@@ -154,24 +148,22 @@ export function useParametricChatMutation({
   const { mutateAsync: insertMessageAsync } = useInsertMessageMutation();
 
   return useMutation({
-    mutationKey: ['parametric-chat', conversationId],
+    mutationKey: ['creative-chat', conversationId],
     mutationFn: async ({
       model,
       messageId,
       conversationId,
-      thinking,
     }: {
       model: Model;
       messageId: string;
       conversationId: string;
-      thinking?: boolean;
     }) => {
       const newMessageId = crypto.randomUUID();
       let initialized = false;
 
       // Start streaming request
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/creative-chat`,
         {
           method: 'POST',
           headers: {
@@ -185,7 +177,6 @@ export function useParametricChatMutation({
             messageId,
             model,
             newMessageId,
-            thinking,
           }),
         },
       );
@@ -321,7 +312,14 @@ export function useParametricChatMutation({
       );
     },
     onError: async (error, { messageId }) => {
-      console.error(error);
+      Sentry.captureException(error, {
+        extra: {
+          hook: 'useCreativeChatMutation',
+          messageId,
+          conversationId,
+        },
+      });
+      // Since abort is handled in the function, we need to handle all other errors here by adding a new message
       try {
         await insertMessageAsync({
           role: 'assistant',
@@ -332,7 +330,215 @@ export function useParametricChatMutation({
           conversation_id: conversationId,
         });
       } catch (error) {
-        console.error(error);
+        Sentry.captureException(error, {
+          extra: {
+            hook: 'useCreativeChatMutation insertMessageAsync',
+            messageId,
+            conversationId,
+          },
+        });
+      }
+    },
+  });
+}
+
+export function useParametricChatMutation({
+  conversationId,
+}: {
+  conversationId: string;
+}) {
+  const queryClient = useQueryClient();
+  const { mutateAsync: insertMessageAsync } = useInsertMessageMutation();
+
+  return useMutation({
+    mutationKey: ['parametric-chat', conversationId],
+    mutationFn: async ({
+      model,
+      messageId,
+      conversationId,
+    }: {
+      model: Model;
+      messageId: string;
+      conversationId: string;
+    }) => {
+      const newMessageId = crypto.randomUUID();
+      let initialized = false;
+
+      // Start streaming request
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parametric-chat`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${
+              (await supabase.auth.getSession()).data.session?.access_token
+            }`,
+          },
+          body: JSON.stringify({
+            conversationId,
+            messageId,
+            model,
+            newMessageId,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Network response was not ok: ${response.status} ${response.statusText}`,
+        );
+      }
+
+      if (response.headers.get('Content-Type')?.includes('application/json')) {
+        const data = await response.json();
+        if (data.message) {
+          return data.message;
+        } else {
+          throw new Error('No message received');
+        }
+      }
+
+      async function initialize() {
+        // Cancel any pending queries and update conversation leaf ID
+        await queryClient.cancelQueries({
+          queryKey: ['conversation', conversationId],
+        });
+        queryClient.setQueryData(
+          ['conversation', conversationId],
+          (oldConversation: Conversation) => ({
+            ...oldConversation,
+            current_message_leaf_id: newMessageId,
+          }),
+        );
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      const decoder = new TextDecoder();
+      let leftover = '';
+
+      let finalMessage: Message | null = null;
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          // Append decoded chunk to leftover buffer
+          leftover += decoder.decode(value, { stream: true });
+
+          // Split into lines; keep the last partial line in leftover
+          const lines = leftover.split('\n');
+          leftover = lines.pop() ?? '';
+
+          for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) continue;
+            try {
+              const data: Message = JSON.parse(line);
+
+              finalMessage = data;
+
+              // Update existing streaming message
+              queryClient.setQueryData(
+                ['messages', conversationId],
+                (oldMessages: Message[] | undefined) => {
+                  if (!oldMessages || oldMessages.length === 0) {
+                    return [data];
+                  }
+                  if (oldMessages.find((msg) => msg.id === data.id)) {
+                    return oldMessages.map((msg) =>
+                      msg.id === data.id ? data : msg,
+                    );
+                  } else {
+                    return [...oldMessages, data];
+                  }
+                },
+              );
+
+              if (!initialized) {
+                await initialize();
+                initialized = true;
+              }
+            } catch (parseError) {
+              console.error('Error parsing streaming data:', parseError);
+            }
+          }
+        }
+
+        // Flush decoder and process any remaining buffered content
+        const flushRemainder = decoder.decode();
+        if (flushRemainder) leftover += flushRemainder;
+        const tail = leftover.trim();
+        if (tail) {
+          try {
+            const data: Message = JSON.parse(tail);
+            finalMessage = data;
+            queryClient.setQueryData(
+              ['messages', conversationId],
+              (oldMessages: Message[] | undefined) => {
+                if (!oldMessages || oldMessages.length === 0) {
+                  return [data];
+                }
+                if (oldMessages.find((msg) => msg.id === data.id)) {
+                  return oldMessages.map((msg) =>
+                    msg.id === data.id ? data : msg,
+                  );
+                } else {
+                  return [...oldMessages, data];
+                }
+              },
+            );
+          } catch (parseError) {
+            console.error('Error parsing final streaming data:', parseError);
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      if (!finalMessage) {
+        throw new Error('No final message received');
+      }
+
+      return finalMessage;
+    },
+    onSuccess: (newMessage) => {
+      messageInsertedConversationUpdate(
+        queryClient,
+        newMessage,
+        conversationId,
+      );
+    },
+    onError: async (error, { messageId }) => {
+      Sentry.captureException(error, {
+        extra: {
+          hook: 'useParametricChatMutation',
+          messageId,
+          conversationId,
+        },
+      });
+      try {
+        await insertMessageAsync({
+          role: 'assistant',
+          content: {
+            text: 'An error occurred while processing your request.',
+          },
+          parent_message_id: messageId,
+          conversation_id: conversationId,
+        });
+      } catch (error) {
+        Sentry.captureException(error, {
+          extra: {
+            hook: 'useParametricChatMutation insertMessageAsync',
+            messageId,
+            conversationId,
+          },
+        });
       }
     },
   });
@@ -343,10 +549,13 @@ export function useSendContentMutation({
 }: {
   conversation: Pick<
     Conversation,
-    'id' | 'current_message_leaf_id' | 'user_id'
+    'id' | 'user_id' | 'settings' | 'current_message_leaf_id' | 'type'
   >;
 }) {
   const { mutateAsync: insertMessageAsync } = useInsertMessageMutation();
+  const { mutateAsync: sendToCreativeChat } = useCreativeChatMutation({
+    conversationId: conversation.id,
+  });
 
   const { mutateAsync: sendToParametricChat } = useParametricChatMutation({
     conversationId: conversation.id,
@@ -355,6 +564,62 @@ export function useSendContentMutation({
   return useMutation({
     mutationKey: ['send-content', conversation.id],
     mutationFn: async (content: Content) => {
+      // Handle image uploads and create message
+      const databaseOperations = [];
+
+      if (content.images && content.images.length > 0) {
+        // Create database entries for images and move them to conversation folder
+        const imageOperations = content.images.map(async (imageId) => {
+          // Create the image record in the database
+          const { error: imageError } = await supabase.from('images').upsert(
+            {
+              id: imageId,
+              prompt: {
+                text: 'User uploaded image',
+              },
+              status: 'success',
+              user_id: conversation.user_id,
+              conversation_id: conversation.id,
+            },
+            {
+              onConflict: 'id',
+              ignoreDuplicates: true,
+            },
+          );
+
+          if (imageError) throw imageError;
+        });
+        databaseOperations.push(...imageOperations);
+      }
+
+      if (content.mesh) {
+        const meshOperation = supabase
+          .from('meshes')
+          .upsert(
+            {
+              id: content.mesh.id,
+              conversation_id: conversation.id,
+              user_id: conversation.user_id,
+              status: 'success',
+              prompt: {
+                text: 'User uploaded mesh',
+              },
+              file_type: content.mesh.fileType,
+            },
+            {
+              onConflict: 'id',
+              ignoreDuplicates: true,
+            },
+          )
+          .then(({ error: meshError }) => {
+            if (meshError) throw meshError;
+          });
+
+        databaseOperations.push(meshOperation);
+      }
+
+      await Promise.all(databaseOperations);
+
       const userMessage = await insertMessageAsync({
         role: 'user',
         content,
@@ -362,12 +627,19 @@ export function useSendContentMutation({
         conversation_id: conversation.id,
       });
 
-      await sendToParametricChat({
-        model: content.model ?? 'anthropic/claude-sonnet-4.6',
-        messageId: userMessage.id,
-        conversationId: conversation.id,
-        thinking: content.thinking,
-      });
+      if (conversation.type === 'creative') {
+        await sendToCreativeChat({
+          model: content.model ?? conversation.settings?.model ?? 'quality',
+          messageId: userMessage.id,
+          conversationId: conversation.id,
+        });
+      } else {
+        await sendToParametricChat({
+          model: content.model ?? conversation.settings?.model ?? 'fast',
+          messageId: userMessage.id,
+          conversationId: conversation.id,
+        });
+      }
     },
   });
 }
@@ -380,8 +652,9 @@ export function useUpdateMessageOptimisticMutation() {
       const { data: updatedMessage, error: messageError } = await supabase
         .from('messages')
         .update({
-          // only content gets updated
+          // only content and rating get updated
           content: message.content,
+          rating: message.rating,
         })
         .eq('id', message.id)
         .eq('conversation_id', message.conversation_id)
@@ -414,7 +687,12 @@ export function useUpdateMessageOptimisticMutation() {
       });
     },
     onError(error, { message }, context) {
-      console.error(error);
+      Sentry.captureException(error, {
+        extra: {
+          hook: 'useUpdateMessageOptimisticMutation',
+          message,
+        },
+      });
       queryClient.setQueryData(
         ['messages', message.conversation_id],
         context?.oldMessages,
@@ -423,10 +701,16 @@ export function useUpdateMessageOptimisticMutation() {
   });
 }
 
-export function useEditMessageMutation() {
-  const { conversation } = useConversation();
-
+export function useEditMessageMutation({
+  conversation,
+}: {
+  conversation: Conversation;
+}) {
   const { mutateAsync: insertMessageAsync } = useInsertMessageMutation();
+
+  const { mutateAsync: sendToCreativeChat } = useCreativeChatMutation({
+    conversationId: conversation.id,
+  });
 
   const { mutateAsync: sendToParametricChat } = useParametricChatMutation({
     conversationId: conversation.id,
@@ -442,21 +726,46 @@ export function useEditMessageMutation() {
         conversation_id: conversation.id,
       });
 
-      sendToParametricChat({
-        model: updatedMessage.content.model ?? 'anthropic/claude-sonnet-4.6',
-        messageId: userMessage.id,
-        conversationId: conversation.id,
-        thinking: updatedMessage.content.thinking,
-      });
+      if (conversation.type === 'creative') {
+        sendToCreativeChat({
+          model: conversation.settings?.model ?? 'quality',
+          messageId: userMessage.id,
+          conversationId: conversation.id,
+        });
+      } else {
+        sendToParametricChat({
+          model: conversation.settings?.model ?? 'fast',
+          messageId: userMessage.id,
+          conversationId: conversation.id,
+        });
+      }
     },
-    onError: (error) => {
-      console.error(error);
+    onError: (error, updatedMessage) => {
+      Sentry.captureException(error, {
+        extra: {
+          hook: 'useEditMessageMutation',
+          updatedMessage,
+          conversationId: conversation.id,
+        },
+      });
     },
   });
 }
 
-export function useRetryMessageMutation() {
-  const { conversation, updateConversationAsync } = useConversation();
+export function useRetryMessageMutation({
+  conversation,
+  updateConversationAsync,
+}: {
+  conversation: Conversation;
+  updateConversationAsync?: UseMutateAsyncFunction<
+    Conversation,
+    Error,
+    Conversation
+  >;
+}) {
+  const { mutateAsync: sendToCreativeChat } = useCreativeChatMutation({
+    conversationId: conversation.id,
+  });
 
   const { mutateAsync: sendToParametricChat } = useParametricChatMutation({
     conversationId: conversation.id,
@@ -471,22 +780,38 @@ export function useRetryMessageMutation() {
 
       await updateConversationAsync({
         ...conversation,
+        settings: {
+          ...(typeof conversation.settings === 'object'
+            ? conversation.settings
+            : {}),
+          model: model,
+        },
         current_message_leaf_id: id,
       });
 
-      // Lookup thinking support for the selected model
-      const modelConfig = PARAMETRIC_MODELS.find((m) => m.id === model);
-      const thinking = modelConfig?.supportsThinking ?? false;
-
-      sendToParametricChat({
-        model: model,
-        messageId: id,
-        conversationId: conversation.id,
-        thinking,
-      });
+      if (conversation.type === 'creative') {
+        sendToCreativeChat({
+          model: model,
+          messageId: id,
+          conversationId: conversation.id,
+        });
+      } else {
+        sendToParametricChat({
+          model: model,
+          messageId: id,
+          conversationId: conversation.id,
+        });
+      }
     },
-    onError: (error) => {
-      console.error(error);
+    onError: (error, { model, id }) => {
+      Sentry.captureException(error, {
+        extra: {
+          hook: 'useRetryMessageMutation',
+          conversationId: conversation.id,
+          model,
+          id,
+        },
+      });
     },
   });
 }
@@ -503,78 +828,196 @@ export function useRestoreMessageMutation() {
         conversation_id: messageToRestore.conversation_id,
       });
     },
-    onError: (error) => {
-      console.error(error);
+    onError: (error, messageToRestore) => {
+      Sentry.captureException(error, {
+        extra: {
+          hook: 'useRestoreMessageMutation',
+          messageToRestore,
+        },
+      });
     },
   });
 }
 
-export function useChangeParameters() {
-  const { mutate: updateMessageOptimistic } =
-    useUpdateMessageOptimisticMutation();
+export function useChangeRatingMutation({
+  conversationId,
+}: {
+  conversationId: string;
+}) {
   const queryClient = useQueryClient();
-  const { conversation } = useConversation();
+  const { mutateAsync: updateMessageOptimistic } =
+    useUpdateMessageOptimisticMutation();
 
-  return useCallback(
-    (message: Message | null, updatedParameters: Parameter[]) => {
-      if (!message) return;
+  const messages = queryClient.getQueryData<Message[]>([
+    'messages',
+    conversationId,
+  ]);
 
-      let newCode = message.content.artifact?.code ?? '';
-      updatedParameters.forEach((param) => {
-        if (param.name.length > 0) {
-          newCode = updateParameter(newCode, param);
-        }
-      });
+  return useMutation({
+    mutationKey: ['change-rating', conversationId],
+    mutationFn: async ({
+      messageId,
+      rating,
+    }: {
+      messageId: string;
+      rating: number;
+    }) => {
+      const oldMessage = messages?.find((msg) => msg.id === messageId);
+      if (!oldMessage) return;
+      updateMessageOptimistic({ message: { ...oldMessage, rating } });
+    },
+  });
+}
 
-      const newContent: Content = {
-        text: message.content.text ?? '',
-        model: message.content.model ?? 'anthropic/claude-sonnet-4.6',
-        artifact: {
-          title: message.content.artifact?.title ?? '',
-          version: message.content.artifact?.version ?? '',
-          code: newCode,
-          parameters: updatedParameters,
-        },
-      };
+export function useUpscaleMutation({
+  conversation,
+  updateConversationAsync,
+}: {
+  conversation: Conversation;
+  updateConversationAsync?: (conversation: Conversation) => Promise<unknown>;
+}) {
+  const queryClient = useQueryClient();
 
-      updateMessageOptimistic(
+  return useMutation({
+    mutationKey: ['upscale', conversation.id],
+    mutationFn: async ({
+      meshId,
+      parentMessageId,
+    }: {
+      meshId: string;
+      parentMessageId: string | null;
+    }) => {
+      // Immediately navigate to parent message to show loading state
+      if (parentMessageId && updateConversationAsync) {
+        await updateConversationAsync({
+          ...conversation,
+          current_message_leaf_id: parentMessageId,
+        });
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mesh`,
         {
-          message: { ...message, content: newContent },
-        },
-        {
-          onError(_error, _variables, context) {
-            if (context?.oldMessages) {
-              queryClient.setQueryData(
-                ['messages', conversation.id],
-                context.oldMessages,
-              );
-            }
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${
+              (await supabase.auth.getSession()).data.session?.access_token
+            }`,
           },
+          body: JSON.stringify({
+            action: 'upscale',
+            meshId,
+            conversationId: conversation.id,
+            parentMessageId,
+          }),
         },
       );
-    },
-    [updateMessageOptimistic, queryClient, conversation.id],
-  );
-}
 
-export function useIsLoading() {
-  const { conversation } = useConversation();
-  const isSendingChat = useIsMutating({
-    mutationKey: ['parametric-chat', conversation.id],
+      if (!response.ok) {
+        throw new Error('Failed to upscale');
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      const decoder = new TextDecoder();
+      let leftover = '';
+      let finalMessage: Message | null = null;
+      let initialized = false;
+
+      async function initialize(messageId: string) {
+        await queryClient.cancelQueries({
+          queryKey: ['conversation', conversation.id],
+        });
+        queryClient.setQueryData(
+          ['conversation', conversation.id],
+          (oldConversation: Conversation) => ({
+            ...oldConversation,
+            current_message_leaf_id: messageId,
+          }),
+        );
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        leftover += decoder.decode(value, { stream: true });
+        const lines = leftover.split('\n');
+        leftover = lines.pop() ?? '';
+
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (!line) continue;
+          try {
+            const data: Message = JSON.parse(line);
+            finalMessage = data;
+
+            queryClient.setQueryData(
+              ['messages', conversation.id],
+              (oldMessages: Message[] | undefined) => {
+                if (!oldMessages || oldMessages.length === 0) {
+                  return [data];
+                }
+                if (oldMessages.find((msg) => msg.id === data.id)) {
+                  return oldMessages.map((msg) =>
+                    msg.id === data.id ? data : msg,
+                  );
+                } else {
+                  return [...oldMessages, data];
+                }
+              },
+            );
+
+            if (!initialized && data.id) {
+              await initialize(data.id);
+              initialized = true;
+            }
+          } catch (parseError) {
+            console.error('Error parsing streaming data:', parseError);
+          }
+        }
+      }
+
+      // Process remaining data
+      const tail = leftover.trim();
+      if (tail) {
+        try {
+          const data: Message = JSON.parse(tail);
+          finalMessage = data;
+          queryClient.setQueryData(
+            ['messages', conversation.id],
+            (oldMessages: Message[] | undefined) => {
+              if (!oldMessages || oldMessages.length === 0) {
+                return [data];
+              }
+              if (oldMessages.find((msg) => msg.id === data.id)) {
+                return oldMessages.map((msg) =>
+                  msg.id === data.id ? data : msg,
+                );
+              } else {
+                return [...oldMessages, data];
+              }
+            },
+          );
+        } catch (parseError) {
+          console.error('Error parsing final streaming data:', parseError);
+        }
+      }
+
+      reader.releaseLock();
+      return finalMessage;
+    },
+    onError: (error) => {
+      Sentry.captureException(error, {
+        extra: {
+          hook: 'useUpscaleMutation',
+          conversationId: conversation.id,
+        },
+      });
+    },
   });
-  const isSendingMessage = useIsMutating({
-    mutationKey: ['send-content', conversation.id],
-  });
-  const isEditingMessage = useIsMutating({
-    mutationKey: ['edit-message', conversation.id],
-  });
-  const isRetryingMessage = useIsMutating({
-    mutationKey: ['retry-message', conversation.id],
-  });
-  const isSending =
-    !!isSendingChat ||
-    !!isSendingMessage ||
-    !!isEditingMessage ||
-    !!isRetryingMessage;
-  return isSending;
 }

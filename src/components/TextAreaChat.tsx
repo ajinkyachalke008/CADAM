@@ -4,46 +4,433 @@ import React, {
   ChangeEvent,
   KeyboardEvent,
   useEffect,
-  useContext,
+  useMemo,
+  useCallback,
 } from 'react';
 import {
   ArrowUp,
   ImagePlus,
   Images,
   Loader2,
+  Square,
   CircleX,
-  Box,
   Wand2,
+  Box,
+  X,
 } from 'lucide-react';
-import { cn, PARAMETRIC_MODELS } from '@/lib/utils';
-import { Content, Conversation, Model } from '@shared/types';
-import { MessageItem } from '@/types/misc';
+import { cn, CREATIVE_MODELS, PARAMETRIC_MODELS } from '@/lib/utils';
+import { Content, CreativeModel, MeshFileType, Model } from '@shared/types';
+import {
+  shouldShowPolygonControls,
+  getModelDefaultPolygonCount,
+  getMaxPolygonCount,
+} from '@/constants/meshConstants';
+
+// Local helper functions for this component
+const shouldShowQuadsControls = (model: Model): boolean => {
+  return shouldShowPolygonControls(model as CreativeModel);
+};
+import { MessageItem } from '../types/misc.ts';
 import { useToast } from '@/hooks/use-toast';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Slider } from '@/components/ui/slider';
+import { Input } from '@/components/ui/input';
 import { useMutation } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
-import { ModelSelector } from './ModelSelector';
-import { Button } from './ui/button';
-import { Textarea } from './ui/textarea';
-import { Avatar } from './ui/avatar';
+import { useAuth } from '@/contexts/AuthContext';
+import { ModelSelector } from '@/components/ModelSelector';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Avatar } from '@/components/ui/avatar';
 import { useItemSelection } from '@/hooks/useItemSelection';
+import {
+  generatePreview,
+  parseSTL,
+  renderMultipleAngles,
+  BoundingBox,
+} from '@/utils/meshUtils';
+import { useMeshFiles } from '@/contexts/MeshFilesContext';
 import { AnimatePresence, motion } from 'framer-motion';
-import { processSTL, isValidSTL } from '@/utils/meshUtils';
-import { MeshFilesContext } from '@/contexts/MeshFilesContext';
 
 interface TextAreaChatProps {
+  type: 'parametric' | 'creative';
   onSubmit: (content: Content) => void;
+  onFocus?: () => void;
+  isLoading?: boolean;
   placeholder?: string;
+  stopGenerating?: () => void;
   disabled?: boolean;
   model: Model;
   setModel: (model: Model) => void;
-  conversation: Pick<Conversation, 'id' | 'user_id'>;
   showPromptGenerator?: boolean;
+  showFullLabels?: boolean; // Controls whether to show full text labels on buttons
+  onTypeChange?: (type: 'parametric' | 'creative') => void;
+  conversation: {
+    id: string;
+    user_id: string;
+  };
 }
+
+// SVG Icon component for the quads/polys toggle
+const QuadsPolysSvg = ({ color = '#D7D7D7' }: { color?: string }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="16"
+    height="16"
+    viewBox="0 0 16 16"
+    fill="none"
+  >
+    <path
+      d="M8 2V14"
+      stroke={color}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M2 8H14"
+      stroke={color}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M12.6667 2H3.33333C2.59695 2 2 2.59695 2 3.33333V12.6667C2 13.403 2.59695 14 3.33333 14H12.6667C13.403 14 14 13.403 14 12.6667V3.33333C14 2.59695 13.403 2 12.6667 2Z"
+      stroke={color}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+// SVG Icon component for the polygon count toggle
+const PolygonCountSvg = ({ color = '#D7D7D7' }: { color?: string }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="16"
+    height="16"
+    viewBox="0 0 16 16"
+    fill="none"
+  >
+    <g clipPath="url(#clip0_17634_35890)">
+      <path
+        d="M1.66651 11.2524C1.58733 11.2062 1.51853 11.1441 1.46442 11.0701C1.41031 10.9961 1.37205 10.9117 1.35203 10.8222C1.33201 10.7328 1.33065 10.6401 1.34806 10.5501C1.36546 10.4601 1.40125 10.3746 1.45317 10.2991L7.45317 1.61908C7.51461 1.53106 7.5964 1.45917 7.69157 1.40954C7.78675 1.3599 7.8925 1.33398 7.99984 1.33398C8.10718 1.33398 8.21294 1.3599 8.30811 1.40954C8.40329 1.45917 8.48507 1.53106 8.54651 1.61908L14.5465 10.2924C14.5996 10.3682 14.6363 10.4542 14.6543 10.5449C14.6723 10.6356 14.6712 10.7291 14.6512 10.8194C14.6311 10.9097 14.5925 10.9948 14.5377 11.0693C14.483 11.1439 14.4133 11.2062 14.3332 11.2524L8.65984 14.4924C8.45874 14.607 8.23128 14.6672 7.99984 14.6672C7.7684 14.6672 7.54094 14.607 7.33984 14.4924L1.66651 11.2524Z"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 1.33398V14.6673"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </g>
+    <defs>
+      <clipPath id="clip0_17634_35890">
+        <rect width="16" height="16" fill="white" />
+      </clipPath>
+    </defs>
+  </svg>
+);
+
+// Polygon Input State Machine
+type PolygonInputState = { type: 'idle' } | { type: 'editing'; value: string };
+
+// Polygon Button Component
+interface PolygonButtonProps {
+  polygonCount: number;
+  meshTopology: 'quads' | 'polys';
+  model: Model;
+  showFullLabels: boolean;
+  isLoading: boolean;
+  disabled: boolean;
+  onPolygonCountChange: (count: number) => void;
+  onReset: () => void;
+}
+
+// Quads Button Component
+interface QuadsButtonProps {
+  meshTopology: 'quads' | 'polys';
+  showFullLabels: boolean;
+  isLoading: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+}
+
+const QuadsButton = ({
+  meshTopology,
+  showFullLabels,
+  isLoading,
+  disabled,
+  onToggle,
+}: QuadsButtonProps) => {
+  const isQuadsEnabled = meshTopology === 'quads';
+
+  const buttonContent = (
+    <button
+      onClick={onToggle}
+      disabled={isLoading || disabled}
+      aria-pressed={isQuadsEnabled}
+      className={cn(
+        'flex h-8 items-center gap-2 rounded-full border px-2 text-sm transition-colors duration-200',
+        'hover:bg-adam-bg-secondary-dark focus:outline-none focus-visible:outline-none focus-visible:ring-0',
+        'items-center justify-center',
+        isQuadsEnabled
+          ? 'border-transparent bg-adam-blue-dark/15 hover:bg-adam-blue-dark/20'
+          : 'border-[#2a2a2a] bg-transparent',
+        showFullLabels && 'pr-[8px]',
+      )}
+    >
+      <QuadsPolysSvg color={isQuadsEnabled ? '#00A6FF' : '#D7D7D7'} />
+      {showFullLabels && (
+        <span
+          className={cn(
+            'hidden text-xs text-adam-text-primary lg:inline',
+            isQuadsEnabled && 'text-[#00A6FF]',
+          )}
+        >
+          Quads
+        </span>
+      )}
+    </button>
+  );
+
+  // Component abstraction instead of nested ternaries
+  if (showFullLabels) {
+    return buttonContent;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{buttonContent}</TooltipTrigger>
+      <TooltipContent>
+        {isQuadsEnabled ? 'Quad topology enabled' : 'Enable quad topology'}
+      </TooltipContent>
+    </Tooltip>
+  );
+};
+
+const PolygonButton = ({
+  polygonCount,
+  meshTopology,
+  model,
+  showFullLabels,
+  isLoading,
+  disabled,
+  onPolygonCountChange,
+  onReset,
+}: PolygonButtonProps) => {
+  // Computed values - no useState needed
+  const maxPolygonCount = getMaxPolygonCount(
+    model as CreativeModel,
+    meshTopology,
+  );
+  // Use model-specific default for determining if value is custom
+  const defaultPolygonCount = getModelDefaultPolygonCount(
+    model as CreativeModel,
+    meshTopology,
+  );
+  const maxInputValue = Math.floor(maxPolygonCount / 1000);
+  const isCustom = polygonCount !== defaultPolygonCount;
+
+  // Only state needed - popover open/closed and input editing
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [isSliderDragging, setIsSliderDragging] = useState(false);
+  const [closeGuardUntil, setCloseGuardUntil] = useState<number>(0);
+  const [inputState, setInputState] = useState<PolygonInputState>({
+    type: 'idle',
+  });
+
+  const formatPolygonCount = (count: number) => {
+    return count >= 1000 ? `${Math.floor(count / 1000)}K` : count.toString();
+  };
+
+  const handleSliderChange = (value: number[]) => {
+    onPolygonCountChange(value[0]);
+  };
+
+  const handleInputStart = (e: React.FocusEvent<HTMLInputElement>) => {
+    setInputState({
+      type: 'editing',
+      value: Math.floor(polygonCount / 1000).toString(),
+    });
+    // Auto-select all text when focused
+    e.target.select();
+  };
+
+  const handleInputChange = (value: string) => {
+    if (inputState.type === 'editing') {
+      if (value === '' || (/^\d+$/.test(value) && parseInt(value, 10) >= 0)) {
+        setInputState({ type: 'editing', value });
+      }
+    }
+  };
+
+  const handleInputComplete = () => {
+    if (inputState.type === 'editing') {
+      const numValue = parseInt(inputState.value, 10);
+      if (!isNaN(numValue) && numValue >= 1 && numValue <= maxInputValue) {
+        onPolygonCountChange(numValue * 1000);
+      }
+      setInputState({ type: 'idle' });
+    }
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleInputComplete();
+      setIsPopoverOpen(false); // Close the popover
+    }
+  };
+
+  const buttonContent = (
+    <button
+      onClick={() => setIsPopoverOpen(true)}
+      disabled={isLoading || disabled}
+      className={cn(
+        'flex h-8 items-center gap-[6px] rounded-full border px-2 text-sm transition-colors duration-200',
+        'hover:bg-adam-bg-secondary-dark focus:outline-none focus-visible:outline-none focus-visible:ring-0',
+        'items-center justify-center',
+        // When popover is open and value is at model-specific default or input is empty while editing,
+        // highlight with neutral-800 background
+        isPopoverOpen &&
+          (!isCustom ||
+            (inputState.type === 'editing' && inputState.value === ''))
+          ? 'border-transparent bg-adam-neutral-800 hover:bg-adam-neutral-700'
+          : isCustom
+            ? 'border-transparent bg-adam-blue-dark/15 hover:bg-adam-blue-dark/20'
+            : 'border-[#2a2a2a] bg-transparent',
+        isCustom && 'pr-[10px]',
+      )}
+    >
+      <PolygonCountSvg color={isCustom ? '#00A6FF' : '#D7D7D7'} />
+      {showFullLabels && (
+        <span
+          className={cn(
+            'hidden text-xs lg:inline',
+            isCustom ? 'text-[#00A6FF]' : 'text-adam-text-primary',
+          )}
+        >
+          {isCustom ? formatPolygonCount(polygonCount) : 'Polygons'}
+        </span>
+      )}
+      {isCustom && (
+        <span
+          className="ml-0.5 flex h-3.5 w-3.5 items-center justify-center"
+          title={`Reset to default (${formatPolygonCount(defaultPolygonCount)})`}
+        >
+          <X
+            className="h-3.5 w-3.5 cursor-pointer text-[#00A6FF] transition-opacity hover:opacity-70"
+            onClick={(e) => {
+              e.stopPropagation();
+              onReset();
+            }}
+          />
+        </span>
+      )}
+    </button>
+  );
+
+  const popoverContent = (
+    <PopoverContent
+      align="start"
+      className="flex w-56 flex-col items-start gap-3 self-stretch rounded-full border-0 bg-adam-neutral-700 p-2 shadow-none"
+      onOpenAutoFocus={(e) => e.preventDefault()}
+      onInteractOutside={(e) => {
+        // Keep popover open if user is dragging or within post-drag guard window
+        if (isSliderDragging || Date.now() < closeGuardUntil) {
+          e.preventDefault();
+        }
+      }}
+    >
+      <div className="flex w-full flex-col gap-3">
+        <div
+          className="flex h-6 items-center gap-3"
+          data-polygon-popover-interactive
+        >
+          <Slider
+            value={[Math.max(1000, polygonCount)]}
+            defaultValue={[defaultPolygonCount]}
+            onValueChange={handleSliderChange}
+            onValueCommit={handleSliderChange}
+            max={maxPolygonCount}
+            min={1000}
+            step={1000}
+            hideDefaultMarker
+            variant="capsule"
+            className="flex-1"
+            onPointerDown={() => setIsSliderDragging(true)}
+            onPointerUp={() => {
+              setIsSliderDragging(false);
+              setCloseGuardUntil(Date.now() + 150);
+            }}
+          />
+          <div className="flex items-center gap-1 pr-2">
+            <Input
+              type="text"
+              value={
+                inputState.type === 'editing'
+                  ? inputState.value
+                  : Math.floor(polygonCount / 1000).toString()
+              }
+              onChange={(e) => handleInputChange(e.target.value)}
+              onFocus={(e) => handleInputStart(e)}
+              onBlur={handleInputComplete}
+              onKeyDown={handleInputKeyDown}
+              onClick={(e) => {
+                e.stopPropagation();
+                // Also select all text when clicking on the input
+                (e.target as HTMLInputElement).select();
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="h-6 w-12 rounded-md border border-adam-neutral-700 bg-adam-neutral-800 px-1 py-0 text-center text-xs text-adam-text-primary selection:bg-[#70B8FF7A] selection:text-white focus:ring-1 focus:ring-adam-blue/20"
+            />
+            <span className="text-xs">k</span>
+          </div>
+        </div>
+      </div>
+    </PopoverContent>
+  );
+
+  // Component abstraction instead of nested ternaries
+  if (showFullLabels) {
+    return (
+      <div className="flex items-center gap-1">
+        <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+          <PopoverTrigger asChild>{buttonContent}</PopoverTrigger>
+          {popoverContent}
+        </Popover>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div>
+            <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+              <PopoverTrigger asChild>{buttonContent}</PopoverTrigger>
+              {popoverContent}
+            </Popover>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>Adjust poly count</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+};
+
+const SUPPORTED_MESH_EXTENSIONS = ['.glb', '.stl', '.obj', '.fbx'] as const;
 
 const VALID_IMAGE_FORMATS = [
   'image/jpeg',
@@ -52,14 +439,40 @@ const VALID_IMAGE_FORMATS = [
   'image/webp',
 ];
 
+const getMeshFileType = (filename: string): MeshFileType => {
+  const lowerFilename = filename.toLowerCase();
+  if (lowerFilename.endsWith('.stl')) return 'stl';
+  if (lowerFilename.endsWith('.obj')) return 'obj';
+  if (lowerFilename.endsWith('.fbx')) return 'fbx';
+  return 'glb';
+};
+
+const isSupportedMeshFile = (
+  filename: string,
+  type: 'creative' | 'parametric',
+): boolean => {
+  const lowerFilename = filename.toLowerCase();
+  if (type === 'creative') {
+    return SUPPORTED_MESH_EXTENSIONS.some((ext) => lowerFilename.endsWith(ext));
+  }
+  // Parametric mode only supports STL (for OpenSCAD import)
+  return lowerFilename.endsWith('.stl');
+};
+
 function TextAreaChat({
   onSubmit,
+  onFocus,
+  isLoading = false,
   placeholder = 'What can Adam help you build today?',
+  type,
+  stopGenerating,
   disabled = false,
   model,
   setModel,
-  conversation,
   showPromptGenerator = false,
+  showFullLabels = false,
+  onTypeChange,
+  conversation,
 }: TextAreaChatProps) {
   const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -74,19 +487,154 @@ function TextAreaChat({
     useState('');
   const prevIsDraggingRef = useRef(isDragging);
   const { toast } = useToast();
-  const { images, setImages, meshUpload, setMeshUpload } = useItemSelection();
-  // MeshFilesContext is optional (only available in EditorView)
-  const meshFilesContext = useContext(MeshFilesContext);
+  const { session } = useAuth();
+  const { images, mesh, setImages, setMesh } = useItemSelection();
+  const meshFiles = useMeshFiles();
 
-  // Check if current model supports thinking
-  const selectedModelConfig = PARAMETRIC_MODELS.find((m) => m.id === model);
-  const supportsThinking = selectedModelConfig?.supportsThinking ?? false;
+  // Parametric mode: bounding box and filename from STL parsing
+  const [meshBoundingBox, setMeshBoundingBox] = useState<BoundingBox | null>(
+    null,
+  );
+  const [meshFilename, setMeshFilename] = useState<string | null>(null);
+
+  // Quads vs Polys toggle state (only for ultra model)
+  const [meshTopology, setMeshTopology] = useState<'quads' | 'polys'>(() => {
+    // Default to 'polys' (quads disabled by default)
+    // Only use localStorage if it's explicitly set to 'quads'
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('adam-mesh-topology');
+      // Only return 'quads' if explicitly stored, otherwise default to 'polys'
+      return stored === 'quads' ? 'quads' : 'polys';
+    }
+    return 'polys';
+  });
+
+  // Polygon count state - single source of truth for user overrides
+  const [polygonOverrides, setPolygonOverrides] = useState<
+    Record<string, number>
+  >(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('adam-polygon-overrides');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          // Validate that it's an object with number values
+          if (typeof parsed === 'object' && parsed !== null) {
+            const isValid = Object.entries(parsed).every(
+              ([key, value]) =>
+                typeof key === 'string' && typeof value === 'number',
+            );
+            return isValid ? parsed : {};
+          }
+        }
+      } catch (error) {
+        console.warn(
+          'Failed to parse polygon overrides from localStorage, resetting:',
+          error,
+        );
+        localStorage.removeItem('adam-polygon-overrides');
+      }
+    }
+    return {};
+  });
+
+  // Set polygon count for current model+topology combination
+  const setPolygonCountForCurrentModel = useCallback(
+    (count: number) => {
+      if (type !== 'creative') return;
+      const modelTopologyKey = `${model}-${meshTopology}`;
+      const defaultCount = getModelDefaultPolygonCount(
+        model as CreativeModel,
+        meshTopology,
+      );
+
+      // If setting to default, remove the override instead of storing it
+      if (count === defaultCount) {
+        setPolygonOverrides((prev) => {
+          const { [modelTopologyKey]: _, ...rest } = prev;
+          return rest;
+        });
+      } else {
+        setPolygonOverrides((prev) => ({
+          ...prev,
+          [modelTopologyKey]: count,
+        }));
+      }
+    },
+    [model, meshTopology, type],
+  );
+
+  // Persist meshTopology changes to localStorage
+  const handleMeshTopologyChange = useCallback(
+    (newTopology: 'quads' | 'polys') => {
+      setMeshTopology(newTopology);
+
+      // Reset polygon count to the model-specific default for the new topology
+      const modelSpecificDefault = getModelDefaultPolygonCount(
+        model as CreativeModel,
+        newTopology,
+      );
+      setPolygonCountForCurrentModel(modelSpecificDefault);
+    },
+    [setPolygonCountForCurrentModel, model],
+  );
+
+  // Derived polygon count - no useState needed, calculated from model + topology + overrides
+  const polygonCount = useMemo(() => {
+    if (type !== 'creative') return 0;
+    const modelTopologyKey = `${model}-${meshTopology}`;
+    const userOverride = polygonOverrides[modelTopologyKey];
+    return (
+      userOverride ??
+      getModelDefaultPolygonCount(model as CreativeModel, meshTopology)
+    );
+  }, [model, meshTopology, polygonOverrides, type]);
+
+  // Persist polygon overrides to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(
+        'adam-polygon-overrides',
+        JSON.stringify(polygonOverrides),
+      );
+    }
+  }, [polygonOverrides]);
+
+  // Persist mesh topology to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('adam-mesh-topology', meshTopology);
+    }
+  }, [meshTopology]);
+
+  // Reset polygon count to default for current model and topology
+  const resetPolygonCount = useCallback(() => {
+    const modelTopologyKey = `${model}-${meshTopology}`;
+    setPolygonOverrides((prev) => {
+      const { [modelTopologyKey]: _, ...rest } = prev;
+      return rest;
+    });
+  }, [model, meshTopology]);
+
+  // When model changes, clear any polygon overrides to use the new model's defaults
+  useEffect(() => {
+    if (type !== 'creative') return;
+
+    // Clear all overrides when switching models to ensure we use the new model's defaults
+    setPolygonOverrides({});
+  }, [model, type]);
+
+  // Computed polygon values for server submission
+  const maxPolygonCount =
+    type === 'creative'
+      ? getMaxPolygonCount(model as CreativeModel, meshTopology)
+      : 0;
 
   // Refs for the two hot-zones
   const topDropZoneRef = useRef<HTMLDivElement>(null);
   const textAreaContainerZoneRef = useRef<HTMLDivElement>(null);
 
-  // Animation variants for image thumbnails
+  // Animation variants for image/mesh thumbnails
   const itemAnimationVariants = {
     initial: { opacity: 0, scale: 0.8 },
     animate: {
@@ -98,6 +646,34 @@ function TextAreaChat({
       scale: 0.8,
     },
   };
+
+  const memoizedModels = useMemo(() => {
+    if (type === 'creative') {
+      return CREATIVE_MODELS;
+    }
+    return PARAMETRIC_MODELS;
+  }, [type]);
+
+  // ------------------------------------------------------------
+  // Placeholder – Typed-out Animation
+  // When the target placeholder (based on mode & image state)
+  // changes, we progressively reveal each character so it looks
+  // like it's being typed in real-time. This gives users a more
+  // delightful sense of state change without abrupt flashes.
+  // ------------------------------------------------------------
+
+  // Helper to decide which placeholder we're targeting right now
+  const computeTargetPlaceholder = useCallback(() => {
+    if (type === 'creative') {
+      if (images.length > 0) return 'Edit uploaded image...';
+      // Model-specific placeholders
+      if (model === 'quality') return 'Make a rough 3D asset...';
+      if (model === 'fast') return 'Make a textureless 3D asset...';
+      if (model === 'ultra') return 'Make a production ready 3D asset...';
+      return 'Speak anything into existence...';
+    }
+    return placeholder;
+  }, [type, images.length, placeholder, model]);
 
   // The text currently shown in the placeholder (animates)
   const [placeholderAnim, setPlaceholderAnim] = useState('');
@@ -120,40 +696,76 @@ function TextAreaChat({
 
   // Kick off crossfade effect whenever the target placeholder changes
   useEffect(() => {
-    startCrossfade(placeholder);
-  }, [placeholder, placeholderAnim]);
+    const target = computeTargetPlaceholder();
 
-  const handleSubmit = async () => {
-    // Filter out mesh renders from user images
-    const userImages = images.filter((img) => img.source !== 'mesh-render');
-    const hasMeshProcessing = meshUpload?.isProcessing;
-
-    // Debug the early return conditions
-    const hasNoContent =
-      userImages.length === 0 && !input?.trim() && !meshUpload;
-    const hasUploadingImages = images.some((img) => img.isUploading);
-
-    if (hasNoContent || disabled || hasUploadingImages || hasMeshProcessing) {
+    // If nothing has changed, make sure we're synced and bail.
+    if (target === placeholderRef.current) {
+      if (placeholderAnim !== target) {
+        setPlaceholderAnim(target);
+      }
       return;
     }
 
-    const content: Content = {
+    startCrossfade(target);
+  }, [
+    type,
+    images.length,
+    placeholder,
+    model,
+    computeTargetPlaceholder,
+    placeholderAnim,
+  ]);
+
+  useEffect(() => {
+    if (type === 'creative' && images.length > 1) {
+      if (model !== 'quality') {
+        setModel('quality');
+      }
+    }
+  }, [images, setModel, model, type]);
+
+  const handleSubmit = async () => {
+    // Debug the early return conditions
+    const hasNoContent = images.length === 0 && !input?.trim() && !mesh;
+    const hasUploadingImages = images.some((img) => img.isUploading);
+
+    if (hasNoContent || isLoading || hasUploadingImages) {
+      return;
+    }
+    let content: Content = {
       ...(input.trim() !== '' && { text: input.trim() }),
-      ...(userImages.length > 0 && { images: userImages.map((img) => img.id) }),
-      // Include mesh data if an STL was uploaded
-      ...(meshUpload && {
-        mesh: { id: meshUpload.id, fileType: 'stl' },
-        meshRenders: meshUpload.renderIds,
-        meshBoundingBox: meshUpload.boundingBox,
-        meshFilename: meshUpload.filename,
-      }),
+      ...(images.length > 0 && { images: images.map((img) => img.id) }),
       model: model,
-      thinking: supportsThinking, // Automatically enable thinking for models that support it
     };
+    if (type === 'creative') {
+      content = {
+        ...content,
+        ...(mesh && {
+          mesh: { id: mesh.id, fileType: mesh.fileType || 'glb' },
+        }),
+        // Include meshTopology preference for standard and ultra models
+        ...(shouldShowPolygonControls(model as CreativeModel) && {
+          meshTopology,
+        }),
+        // Include polygonCount preference for standard and ultra (respect quads mode limit)
+        ...(shouldShowPolygonControls(model as CreativeModel) && {
+          polygonCount: Math.min(polygonCount, maxPolygonCount),
+        }),
+      };
+    } else if (type === 'parametric' && mesh) {
+      content = {
+        ...content,
+        mesh: { id: mesh.id, fileType: 'stl' },
+        ...(meshBoundingBox && { meshBoundingBox }),
+        ...(meshFilename && { meshFilename }),
+      };
+    }
     onSubmit(content);
     setInput('');
     setImages([]);
-    setMeshUpload(null);
+    setMesh(null);
+    setMeshBoundingBox(null);
+    setMeshFilename(null);
   };
 
   const { mutateAsync: uploadImageAsync } = useMutation({
@@ -184,150 +796,82 @@ function TextAreaChat({
     },
   });
 
-  // Upload a blob (used for STL renders)
-  const { mutateAsync: uploadBlobAsync } = useMutation({
-    mutationFn: async ({ blob, id }: { blob: Blob; id: string }) => {
+  const { mutateAsync: uploadMeshAsync } = useMutation({
+    mutationFn: async ({ file, id }: { file: File; id: string }) => {
+      // Determine file extension
+      const fileExtension = getMeshFileType(file.name);
+
       const { error } = await supabase.storage
-        .from('images')
-        .upload(`${conversation.user_id}/${conversation.id}/${id}`, blob);
+        .from('meshes')
+        .upload(
+          `${conversation.user_id}/${conversation.id}/${id}.${fileExtension}`,
+          file,
+        );
 
       if (error) throw error;
 
-      return URL.createObjectURL(blob);
+      // Check if preview exists in storage
+      const previewPath = `${conversation.user_id}/${conversation.id}/preview-${id}`;
+
+      const { data } = await supabase.storage
+        .from('images')
+        .createSignedUrl(previewPath, 60 * 60); // 1 hour expiry
+
+      if (data && data.signedUrl) {
+        return data.signedUrl;
+      }
+
+      // If preview doesn't exist, generate it with the correct file type
+      const preview = await generatePreview(file, fileExtension);
+
+      // Only upload if the current user is the conversation owner
+      if (session?.user.id === conversation.user_id) {
+        // Convert data URL to Blob
+        const response = await fetch(preview);
+        const blob = await response.blob();
+
+        // Save the preview to storage
+        const { error: uploadError } = await supabase.storage
+          .from('images')
+          .upload(previewPath, blob, {
+            contentType: 'image/png',
+            upsert: true,
+          });
+
+        if (uploadError) {
+          console.error('Error uploading preview:', uploadError);
+          return preview; // Return the preview anyway even if upload fails
+        }
+
+        // Get the signed URL of the uploaded preview
+        const { data } = await supabase.storage
+          .from('images')
+          .createSignedUrl(previewPath, 60 * 60); // 1 hour expiry
+        return data?.signedUrl;
+      }
+
+      // If not the owner, just return the generated preview
+      return preview;
     },
     onError: () => {
       toast({
         title: 'Error',
-        description: 'Failed to upload render',
+        description: 'Failed to upload mesh',
         variant: 'destructive',
       });
     },
   });
-
-  // Process and upload an STL file
-  const handleSTLUpload = async (file: File) => {
-    const meshId = crypto.randomUUID();
-    // Sanitize filename for OpenSCAD (remove spaces, special chars)
-    const safeFilename =
-      file.name
-        .toLowerCase()
-        .replace(/[^a-z0-9._-]/g, '_')
-        .replace(/\.stl$/i, '') + '.stl';
-
-    // Set processing state with placeholder values
-    setMeshUpload({
-      id: meshId,
-      filename: safeFilename,
-      boundingBox: { x: 0, y: 0, z: 0 },
-      renderIds: [],
-      isProcessing: true,
-      fileContent: file, // Store the actual file content for OpenSCAD import
-    });
-
-    try {
-      // Process STL to get renders and bounding box
-      const { boundingBox, renders } = await processSTL(file);
-
-      // Upload the STL file to storage (for persistence/sharing)
-      const { error: stlError } = await supabase.storage
-        .from('images')
-        .upload(
-          `${conversation.user_id}/${conversation.id}/mesh-${meshId}.stl`,
-          file,
-        );
-
-      if (stlError) throw stlError;
-
-      // Upload renders and collect their IDs
-      const renderIds: string[] = [];
-      const renderUrls: string[] = [];
-
-      for (let i = 0; i < renders.length; i++) {
-        const renderId = `render-${meshId}-${i}.png`;
-        renderIds.push(renderId);
-
-        const url = await uploadBlobAsync({ blob: renders[i], id: renderId });
-        renderUrls.push(url);
-      }
-
-      // Add render thumbnails to images for display
-      const renderItems: MessageItem[] = renderIds.map((id, index) => ({
-        id,
-        isUploading: false,
-        url: renderUrls[index],
-        source: 'mesh-render' as const,
-        meshId,
-      }));
-
-      setImages((prev) => [...prev, ...renderItems]);
-
-      // Update mesh upload state with final data (keep file content)
-      setMeshUpload({
-        id: meshId,
-        filename: safeFilename,
-        boundingBox,
-        renderIds,
-        isProcessing: false,
-        fileContent: file,
-      });
-
-      // Store mesh file in context for OpenSCAD import (if context available)
-      if (meshFilesContext) {
-        meshFilesContext.setMeshFile(safeFilename, file);
-      }
-    } catch (error) {
-      console.error('Error processing STL:', error);
-      setMeshUpload(null);
-      toast({
-        title: 'Error processing 3D model',
-        description:
-          error instanceof Error ? error.message : 'Failed to process STL file',
-        variant: 'destructive',
-      });
-    }
-  };
 
   const addItems = async (files: FileList) => {
     const newItems = Array.from(files);
     let hasSmallImages = false;
     let hasLargeImages = false;
     let hasInvalidImages = false;
+    let hasInvalidItems = false;
     const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB limit
 
-    // Separate STL files from images
-    const stlFiles: File[] = [];
-    const imageFiles: File[] = [];
-
-    for (const file of newItems) {
-      if (isValidSTL(file)) {
-        stlFiles.push(file);
-      } else {
-        imageFiles.push(file);
-      }
-    }
-
-    // Handle STL files (only allow one at a time for now)
-    if (stlFiles.length > 0) {
-      if (meshUpload) {
-        toast({
-          title: 'Only one 3D model at a time',
-          description: 'Please remove the current model before adding another.',
-        });
-      } else {
-        // Process first STL file
-        await handleSTLUpload(stlFiles[0]);
-        if (stlFiles.length > 1) {
-          toast({
-            title: 'Multiple 3D models',
-            description: 'Only the first STL file was added.',
-          });
-        }
-      }
-    }
-
-    // Process image files
     const validImages = await Promise.all(
-      imageFiles.map(async (file) => {
+      newItems.map(async (file) => {
         // First check file type Must be jpeg, png, gif, or webp.
         if (!file.type.includes('image')) {
           return null;
@@ -365,10 +909,25 @@ function TextAreaChat({
       }),
     );
 
+    const validMeshes = newItems.map((file) => {
+      if (!isSupportedMeshFile(file.name, type)) {
+        return null;
+      }
+
+      return file;
+    });
+
     // Filter out null values (invalid images)
     const filteredImages = validImages.filter(
       (img): img is File => img !== null,
     );
+
+    const filteredMeshes = validMeshes.filter(
+      (mesh): mesh is File => mesh !== null,
+    );
+
+    hasInvalidItems =
+      newItems.length > filteredImages.length + filteredMeshes.length;
 
     // Show specific errors first, then generic error only if there are truly invalid file types
     if (hasSmallImages) {
@@ -389,7 +948,85 @@ function TextAreaChat({
         description:
           'Some images were not added because they are not valid image formats. Must be jpeg, png, or webp.',
       });
+    } else if (hasInvalidItems) {
+      toast({
+        title: 'Invalid file format',
+        description:
+          type === 'creative'
+            ? 'Some files were not added because they are not valid file formats. Must be jpeg, png, webp, glb, stl, or obj.'
+            : 'Some files were not added because they are not valid file formats. Must be jpeg, png, webp, or stl.',
+      });
     }
+
+    filteredMeshes.forEach(async (file) => {
+      const tempId = crypto.randomUUID();
+      const fileType = getMeshFileType(file.name);
+      setMesh({ id: tempId, isUploading: true, source: 'upload', fileType });
+      try {
+        // For parametric mode STL files, extract bounding box and generate multi-angle renders
+        if (type === 'parametric' && fileType === 'stl') {
+          const { geometry, boundingBox } = await parseSTL(file);
+          setMeshBoundingBox(boundingBox);
+          setMeshFilename(file.name);
+
+          // Store STL blob in context for WASM filesystem access
+          meshFiles.setMeshFile(file.name, file);
+
+          // Generate multi-angle renders and upload as images
+          const renders = await renderMultipleAngles(geometry, boundingBox);
+          for (const renderBlob of renders) {
+            const renderId = crypto.randomUUID();
+            const renderFile = new File(
+              [renderBlob],
+              `render-${renderId}.png`,
+              {
+                type: 'image/png',
+              },
+            );
+            const url = URL.createObjectURL(renderBlob);
+            setImages((prevImages) => [
+              ...prevImages,
+              { id: renderId, isUploading: true, source: 'upload', url },
+            ]);
+            try {
+              const signedUrl = await uploadImageAsync({
+                file: renderFile,
+                id: renderId,
+              });
+              URL.revokeObjectURL(url);
+              setImages((prevImages) =>
+                prevImages.map((img) =>
+                  img.id === renderId
+                    ? { ...img, isUploading: false, url: signedUrl }
+                    : img,
+                ),
+              );
+            } catch (renderError) {
+              console.error('Error uploading render:', renderError);
+              setImages((prevImages) =>
+                prevImages.filter((img) => img.id !== renderId),
+              );
+            }
+          }
+
+          geometry.dispose();
+        }
+
+        const url = await uploadMeshAsync({ file: file, id: tempId });
+        setMesh({
+          id: tempId,
+          isUploading: false,
+          url,
+          source: 'upload',
+          fileType,
+        });
+      } catch (error) {
+        console.error('Error uploading mesh:', error);
+        setMesh(null);
+        setMeshBoundingBox(null);
+        setMeshFilename(null);
+      }
+    });
 
     // Upload each valid image immediately
     filteredImages.forEach(async (file) => {
@@ -463,38 +1100,37 @@ function TextAreaChat({
     }
   };
 
+  const handleMeshRemoved = async () => {
+    if (mesh?.source === 'upload') {
+      try {
+        const fileExtension = mesh.fileType || 'glb'; // Default to glb if fileType is not set
+        await Promise.all([
+          supabase.storage
+            .from('meshes')
+            .remove([
+              `${session?.user?.id}/${conversation.id}/${mesh.id}.${fileExtension}`,
+            ]),
+          supabase.storage
+            .from('images')
+            .remove([
+              `${session?.user?.id}/${conversation.id}/preview-${mesh.id}`,
+            ]),
+        ]);
+      } catch (error) {
+        console.error('Error removing mesh:', error);
+      }
+    }
+    setMesh(null);
+  };
+
   const handleImageRemoved = async (image: MessageItem) => {
     if (!image.isUploading) {
-      // If this is a mesh render, clear the entire mesh upload
-      if (image.source === 'mesh-render' && image.meshId) {
-        try {
-          // Remove all renders and the STL file
-          const pathsToRemove = [
-            `${conversation.user_id}/${conversation.id}/mesh-${image.meshId}.stl`,
-            ...images
-              .filter((img) => img.meshId === image.meshId)
-              .map(
-                (img) => `${conversation.user_id}/${conversation.id}/${img.id}`,
-              ),
-          ];
-          await supabase.storage.from('images').remove(pathsToRemove);
-        } catch (error) {
-          console.error('Error removing mesh files:', error);
-        }
-        // Remove all renders for this mesh from images
-        setImages((prevImages) =>
-          prevImages.filter((img) => img.meshId !== image.meshId),
-        );
-        setMeshUpload(null);
-        return;
-      }
-
       // Only try to remove from storage if the item has been uploaded
       if (image.source === 'upload') {
         try {
           await supabase.storage
             .from('images')
-            .remove([`${conversation.user_id}/${conversation.id}/${image.id}`]);
+            .remove([`${session?.user?.id}/${conversation.id}/${image.id}`]);
         } catch (error) {
           console.error('Error removing image:', error);
         }
@@ -515,6 +1151,7 @@ function TextAreaChat({
           method: 'POST',
           body: {
             existingText: input.trim() || null,
+            type: type, // Send the mode type (parametric or creative)
           },
         },
       );
@@ -593,7 +1230,7 @@ function TextAreaChat({
   }, []);
 
   useEffect(() => {
-    if (images.length === 0) {
+    if (images.length === 0 && mesh === null) {
       // Case 1: No items are present in the drop zone
       if (isDragging) {
         // If dragging, the message should be visible and can transition
@@ -622,7 +1259,7 @@ function TextAreaChat({
       setDropMessageOpacityClass('opacity-0 pointer-events-none');
     }
     prevIsDraggingRef.current = isDragging;
-  }, [isDragging, images.length]);
+  }, [isDragging, images.length, mesh]); // Listen to images.length and mesh too
 
   return (
     <div
@@ -645,6 +1282,7 @@ function TextAreaChat({
         }
       }}
       onClick={() => {
+        onFocus?.();
         textareaRef.current?.focus();
       }}
     >
@@ -655,13 +1293,13 @@ function TextAreaChat({
           'transition-[height,opacity,border-color,background-color] duration-200 ease-in-out',
           disabled
             ? 'h-0 border-transparent bg-transparent opacity-0'
-            : !isDragging && images.length === 0
+            : !isDragging && images.length === 0 && mesh === null
               ? 'h-0 border-transparent bg-transparent opacity-0'
               : isDragging
                 ? isDragHover
                   ? 'h-20 border-[#00A6FF] bg-[rgba(0,166,255,0.24)] opacity-100' // Blue, full height
                   : 'h-20 border-[#0077B7] bg-[rgba(0,166,255,0.12)] opacity-100' // Intermediate blue, full height
-                : images.length > 0
+                : images.length > 0 || mesh !== null
                   ? 'h-20 border-adam-neutral-700 bg-adam-neutral-950 opacity-100'
                   : 'h-0 border-transparent bg-transparent opacity-0',
         )}
@@ -689,7 +1327,7 @@ function TextAreaChat({
         {!disabled && (
           <>
             {/* Case 1: Dragging, and items are ALREADY present -> Show "Add more images" prompt */}
-            {isDragging && images.length > 0 ? (
+            {isDragging && (images.length > 0 || mesh !== null) ? (
               <div
                 className={cn(
                   'flex h-full w-full flex-row items-center justify-center gap-2', // Ensure it fills parent
@@ -711,8 +1349,8 @@ function TextAreaChat({
                   Add more images here
                 </p>
               </div>
-            ) : /* Case 2: No items (images are zero) -> Show original "Drop images and 3D models here" logic */
-            images.length === 0 ? (
+            ) : /* Case 2: No items (images/mesh are zero) -> Show original "Drop images and 3D models here" logic */
+            images.length === 0 && mesh === null ? (
               <div
                 className={cn(
                   'flex h-full w-full flex-row items-center justify-center gap-2', // Ensure it fills parent
@@ -737,12 +1375,12 @@ function TextAreaChat({
               </div>
             ) : (
               /* Case 3: Items are present, and NOT dragging -> Show thumbnails */
-              images.length > 0 && (
+              (images.length > 0 || mesh !== null) && (
                 <div
                   className={cn(
                     'flex w-full items-center gap-4 overflow-x-auto overflow-y-hidden p-4',
                     // Opacity dimming logic can remain if desired, or be simplified
-                    isDragging && images.length > 0
+                    isDragging && (images.length > 0 || mesh !== null)
                       ? 'opacity-60'
                       : 'opacity-100',
                     'transition-opacity duration-150',
@@ -750,6 +1388,46 @@ function TextAreaChat({
                 >
                   <AnimatePresence>
                     {' '}
+                    {/* Ensure no initial={false} here */}
+                    {mesh && (
+                      <motion.div
+                        key={`mesh-${mesh.id}`}
+                        className="relative h-12 w-12 flex-shrink-0"
+                        variants={itemAnimationVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                        layout
+                      >
+                        {mesh.url && (
+                          <img
+                            src={mesh.url}
+                            alt="Mesh"
+                            className="h-12 w-12 rounded-md object-cover"
+                          />
+                        )}
+                        {mesh.isUploading && (
+                          <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/50">
+                            <Loader2 className="h-4 w-4 animate-spin text-white" />
+                          </div>
+                        )}
+                        {!mesh.isUploading && (
+                          <div className="absolute bottom-[-0.50rem] right-[-0.50rem] rounded-full border border-adam-neutral-500 bg-adam-neutral-500 text-white transition-colors duration-200 hover:border-adam-neutral-700 hover:bg-adam-neutral-700">
+                            <Box className="h-4 w-4 text-white" />
+                          </div>
+                        )}
+                        <button
+                          onClick={handleMeshRemoved}
+                          disabled={mesh.isUploading}
+                          className={cn(
+                            'absolute right-[-0.50rem] top-[-0.50rem] rounded-full border border-adam-neutral-500 bg-adam-neutral-500 text-white transition-colors duration-200 hover:border-adam-neutral-700 hover:bg-adam-neutral-700',
+                            mesh.isUploading && 'opacity-50',
+                          )}
+                        >
+                          <CircleX className="h-4 w-4 stroke-[1.5]" />
+                        </button>
+                      </motion.div>
+                    )}
                     {images.map((image) => (
                       <motion.div
                         key={`image-${image.id}`}
@@ -762,19 +1440,9 @@ function TextAreaChat({
                       >
                         <img
                           src={image.url}
-                          alt={
-                            image.source === 'mesh-render'
-                              ? '3D Model View'
-                              : 'Image'
-                          }
+                          alt="Image"
                           className="h-12 w-12 rounded-md object-cover"
                         />
-                        {/* Show 3D icon badge for mesh renders */}
-                        {image.source === 'mesh-render' && (
-                          <div className="absolute bottom-0 left-0 rounded-br-md rounded-tl-md bg-adam-blue/80 p-0.5">
-                            <Box className="h-3 w-3 text-white" />
-                          </div>
-                        )}
                         {image.isUploading && (
                           <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/50">
                             <Loader2 className="h-4 w-4 animate-spin text-white" />
@@ -841,7 +1509,7 @@ function TextAreaChat({
           </Avatar>
           <div className="relative grid w-full">
             <Textarea
-              disabled={disabled}
+              disabled={isLoading || disabled}
               value={input}
               ref={textareaRef}
               translate="no"
@@ -876,12 +1544,12 @@ function TextAreaChat({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 flex-shrink-0 rounded-full hover:bg-adam-neutral-800"
+                  className="h-8 w-8 rounded-full hover:bg-adam-neutral-800"
                   onClick={(e) => {
                     e.stopPropagation();
                     generatePrompt();
                   }}
-                  disabled={isGeneratingPrompt || disabled}
+                  disabled={isGeneratingPrompt || isLoading || disabled}
                 >
                   {isGeneratingPrompt ? (
                     <Loader2 className="h-4 w-4 animate-spin text-adam-blue" />
@@ -897,7 +1565,7 @@ function TextAreaChat({
           )}
         </div>
         <div className="flex items-center justify-between border-t border-[#2a2a2a] p-3">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
             <div
               className={cn(
                 'transition-all duration-300 ease-out',
@@ -911,8 +1579,11 @@ function TextAreaChat({
                   e.stopPropagation();
                   const input = document.createElement('input');
                   input.type = 'file';
-                  input.accept = [...VALID_IMAGE_FORMATS, '.stl'].join(', ');
-                  input.multiple = true;
+                  input.accept = `${VALID_IMAGE_FORMATS.join(', ')}, ${
+                    type === 'creative'
+                      ? SUPPORTED_MESH_EXTENSIONS.join(', ')
+                      : '.stl'
+                  }`;
                   input.onchange = (event) => {
                     handleItemsChange(
                       event as unknown as ChangeEvent<HTMLInputElement>,
@@ -920,48 +1591,114 @@ function TextAreaChat({
                   };
                   input.click();
                 }}
-                disabled={disabled || meshUpload?.isProcessing}
+                disabled={disabled}
               >
-                {meshUpload?.isProcessing ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <ImagePlus className="h-5 w-5" />
-                )}
+                <ImagePlus className="h-5 w-5" />
               </Button>
             </div>
+
+            {/* Creative mode toggle button */}
+            {onTypeChange && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      'flex h-8 items-center gap-1.5 rounded-lg border border-[#2a2a2a] bg-adam-background-2 px-2 text-sm transition-colors',
+                      type === 'creative'
+                        ? 'border-adam-blue/50 bg-adam-blue/10 text-adam-blue'
+                        : 'text-adam-text-secondary hover:bg-adam-bg-secondary-dark',
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTypeChange(
+                        type === 'parametric' ? 'creative' : 'parametric',
+                      );
+                    }}
+                  >
+                    <Box className="h-4 w-4" />
+                    <span className="hidden text-xs lg:inline">Mesh</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {type === 'parametric'
+                    ? 'Switch to Creative mode'
+                    : 'Switch to Parametric mode'}
+                </TooltipContent>
+              </Tooltip>
+            )}
+
+            {/* Quads vs Polys toggle button - show for standard and ultra models */}
+            {type === 'creative' && shouldShowQuadsControls(model) && (
+              <QuadsButton
+                meshTopology={meshTopology}
+                showFullLabels={showFullLabels}
+                isLoading={isLoading}
+                disabled={disabled}
+                onToggle={() =>
+                  handleMeshTopologyChange(
+                    meshTopology === 'quads' ? 'polys' : 'quads',
+                  )
+                }
+              />
+            )}
+
+            {/* Polygon Count button - show for standard and ultra models */}
+            {type === 'creative' && shouldShowQuadsControls(model) && (
+              <PolygonButton
+                polygonCount={polygonCount}
+                meshTopology={meshTopology}
+                model={model}
+                showFullLabels={showFullLabels}
+                isLoading={isLoading}
+                disabled={disabled || false}
+                onPolygonCountChange={setPolygonCountForCurrentModel}
+                onReset={resetPolygonCount}
+              />
+            )}
           </div>
 
           <div className="flex items-center gap-2">
             <ModelSelector
-              disabled={disabled}
-              models={PARAMETRIC_MODELS}
+              disabled={isLoading || disabled}
+              models={memoizedModels}
               selectedModel={model}
               onModelChange={setModel}
+              type={type}
               focused={isFocused}
             />
             {/* Enhanced submit button */}
-            <button
-              onClick={() => {
-                handleSubmit();
-              }}
-              className={cn(
-                'flex h-8 w-8 transform items-center justify-center rounded-lg bg-adam-neutral-700 p-1 text-white transition-all duration-300 hover:scale-105 hover:bg-adam-blue/90 disabled:opacity-50 disabled:hover:scale-100 disabled:hover:bg-adam-blue',
-                (images.some((img) => img.isUploading) ||
-                  meshUpload?.isProcessing) &&
-                  'opacity-50',
-              )}
-              disabled={
-                (images.filter((img) => img.source !== 'mesh-render').length ===
-                  0 &&
-                  !input?.trim() &&
-                  !meshUpload) ||
-                images.some((img) => img.isUploading) ||
-                meshUpload?.isProcessing ||
-                disabled
-              }
-            >
-              <ArrowUp className="h-5 w-5" />
-            </button>
+            {isLoading && stopGenerating ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={stopGenerating}
+                    className="flex h-8 w-8 transform items-center justify-center rounded-lg bg-adam-neutral-700 p-1 text-white transition-all duration-300 hover:scale-105 hover:bg-adam-blue/90 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100 disabled:hover:bg-adam-blue"
+                  >
+                    <Square className="h-5 w-5 fill-white" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Stop generation</TooltipContent>
+              </Tooltip>
+            ) : (
+              <button
+                onClick={() => {
+                  handleSubmit();
+                }}
+                className={cn(
+                  'flex h-8 w-8 transform items-center justify-center rounded-lg bg-adam-neutral-700 p-1 text-white transition-all duration-300 hover:scale-105 hover:bg-adam-blue/90 disabled:opacity-50 disabled:hover:scale-100 disabled:hover:bg-adam-blue',
+                  images.some((img) => img.isUploading) && 'opacity-50',
+                )}
+                disabled={
+                  (images.length === 0 && !input?.trim()) ||
+                  isLoading ||
+                  images.some((img) => img.isUploading) ||
+                  disabled
+                }
+              >
+                <ArrowUp className="h-5 w-5" />
+              </button>
+            )}
           </div>
         </div>
       </div>

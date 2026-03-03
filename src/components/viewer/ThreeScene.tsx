@@ -11,20 +11,34 @@ import {
 import * as THREE from 'three';
 import { useState } from 'react';
 import { OrthographicPerspectiveToggle } from '@/components/viewer/OrthographicPerspectiveToggle';
-import { useColor } from '@/contexts/ColorContext';
+import { cn } from '@/lib/utils';
 
-export function ThreeScene({ geometry }: { geometry: THREE.BufferGeometry }) {
-  const { color } = useColor();
-  const [isOrthographic, setIsOrthographic] = useState(true);
+interface ThreeSceneProps {
+  geometry: THREE.BufferGeometry;
+  color: string;
+  isMobile?: boolean;
+  backgroundColor?: string;
+}
+
+export function ThreeScene({
+  geometry,
+  color,
+  isMobile = false,
+  backgroundColor = '#3B3B3B',
+}: ThreeSceneProps) {
+  const [isOrthographic, setIsOrthographic] = useState(false);
+
+  // Store the initial isMobile value to prevent position changes during resize
+  const [initialIsMobile] = useState(isMobile);
 
   return (
     <div className="relative h-full w-full overflow-hidden">
       <Canvas className="block h-full w-full">
-        <color attach="background" args={['#3B3B3B']} />
+        <color attach="background" args={[backgroundColor]} />
         {isOrthographic ? (
           <OrthographicCamera
             makeDefault
-            position={[-100, 100, 100]}
+            position={initialIsMobile ? [-100, 150, 100] : [-100, 100, 100]}
             zoom={40}
             near={0.1}
             far={1000}
@@ -32,7 +46,7 @@ export function ThreeScene({ geometry }: { geometry: THREE.BufferGeometry }) {
         ) : (
           <PerspectiveCamera
             makeDefault
-            position={[-100, 100, 100]}
+            position={initialIsMobile ? [-100, 150, 100] : [-100, 100, 100]}
             fov={45}
             near={0.1}
             far={1000}
@@ -73,12 +87,19 @@ export function ThreeScene({ geometry }: { geometry: THREE.BufferGeometry }) {
           infiniteGrid={true}
         /> */}
         <OrbitControls makeDefault enableDamping={true} dampingFactor={0.05} />
-        <GizmoHelper alignment="bottom-right" margin={[80, 90]}>
-          <GizmoViewcube />
-        </GizmoHelper>
+        {!initialIsMobile && (
+          <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
+            <GizmoViewcube />
+          </GizmoHelper>
+        )}
       </Canvas>
 
-      <div className="absolute bottom-2 right-9 flex flex-col items-center">
+      <div
+        className={cn(
+          'absolute flex flex-col items-center',
+          initialIsMobile ? 'bottom-2 right-2' : 'bottom-2 right-9',
+        )}
+      >
         <div className="flex items-center gap-2">
           <OrthographicPerspectiveToggle
             isOrthographic={isOrthographic}

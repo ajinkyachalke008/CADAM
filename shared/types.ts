@@ -1,5 +1,13 @@
 import { Database } from './database.ts';
 export type Model = string;
+export type CreativeModel = 'quality' | 'fast' | 'ultra';
+
+export type Prompt = {
+  text?: string;
+  images?: string[];
+  mesh?: string;
+  model?: Model;
+};
 
 export type Message = Omit<
   Database['public']['Tables']['messages']['Row'],
@@ -11,11 +19,25 @@ export type Message = Omit<
 
 export type CoreMessage = Pick<Message, 'id' | 'role' | 'content'>;
 
+export type MeshFileType = Database['public']['Enums']['mesh_file_type'];
+
+export type Mesh = {
+  id: string;
+  fileType: MeshFileType;
+};
+
+export type MeshData = Omit<
+  Database['public']['Tables']['meshes']['Row'],
+  'prompt'
+> & {
+  prompt: Prompt;
+};
+
 export type ToolCall = {
   name: string;
   status: 'pending' | 'error';
   id?: string;
-  result?: { id: string };
+  result?: { id: string; fileType?: MeshFileType };
 };
 
 export type Content = {
@@ -28,28 +50,19 @@ export type Content = {
   index?: number;
   images?: string[];
   mesh?: Mesh;
-  // Auto-generated renders of uploaded STL from multiple angles (for AI analysis)
-  meshRenders?: string[];
-  // Bounding box dimensions of uploaded STL in mm
-  meshBoundingBox?: BoundingBox;
-  // Filename for the uploaded mesh (sanitized, for use in OpenSCAD import())
+  // Parametric mode: bounding box dimensions from STL parsing
+  meshBoundingBox?: { x: number; y: number; z: number };
+  // Parametric mode: original filename for import() in OpenSCAD
   meshFilename?: string;
+  suggestions?: string[];
   // For streaming support - shows in-progress tool calls
   toolCalls?: ToolCall[];
-  thinking?: boolean;
-};
-
-export type MeshFileType = string;
-
-export type Mesh = {
-  id: string;
-  fileType: MeshFileType;
-};
-
-export type BoundingBox = {
-  x: number;
-  y: number;
-  z: number;
+  // Mesh topology preference (quads vs polys) for quality model
+  meshTopology?: 'quads' | 'polys';
+  // Polygon count preference for quality model
+  polygonCount?: number;
+  // File format preference for quad topology models
+  preferredFormat?: 'glb' | 'fbx';
 };
 
 export type ParametricArtifact = {
@@ -57,6 +70,7 @@ export type ParametricArtifact = {
   version: string;
   code: string;
   parameters: Parameter[];
+  suggestions?: string[];
 };
 
 export type ParameterOption = { value: string | number; label: string };
@@ -85,4 +99,17 @@ export type Parameter = {
   maxLength?: number;
 };
 
-export type Conversation = Database['public']['Tables']['conversations']['Row'];
+export type Conversation = Omit<
+  Database['public']['Tables']['conversations']['Row'],
+  'settings'
+> & {
+  settings: ConversationSettings;
+};
+
+export type GenerationStatus = Database['public']['Enums']['generation-status'];
+
+export type ConversationSettings = {
+  model?: Model;
+} | null;
+
+export type Profile = Database['public']['Tables']['profiles']['Row'];

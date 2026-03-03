@@ -4,7 +4,10 @@ CREATE TABLE IF NOT EXISTS "public"."conversations" (
     "updated_at" timestamp with time zone DEFAULT "now"(),
     "user_id" "uuid" NOT NULL,
     "title" "text" NOT NULL,
-    "current_message_leaf_id" "uuid"
+    "type" "public"."conversation-type" DEFAULT 'parametric'::"public"."conversation-type" NOT NULL,
+    "privacy" "public"."privacy_type" DEFAULT 'private'::"public"."privacy_type" NOT NULL,
+    "current_message_leaf_id" "uuid",
+    "settings" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL
 );
 
 
@@ -23,6 +26,8 @@ CREATE INDEX IF NOT EXISTS conversations_updated_at_idx ON "public"."conversatio
 
 CREATE INDEX IF NOT EXISTS conversations_user_id_idx ON "public"."conversations" USING btree (user_id);
 
+
+CREATE POLICY "Anyone can view a public conversation" ON "public"."conversations" FOR SELECT TO "authenticated", "anon" USING (("privacy" = 'public'::"public"."privacy_type"));
 
 CREATE POLICY "Users can manage their own conversations" ON "public"."conversations" USING ( (SELECT "auth"."uid"()) = "user_id" );
 

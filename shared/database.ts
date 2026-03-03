@@ -17,10 +17,10 @@ export type Database = {
     Functions: {
       graphql: {
         Args: {
-          extensions?: Json;
           operationName?: string;
           query?: string;
           variables?: Json;
+          extensions?: Json;
         };
         Returns: Json;
       };
@@ -39,7 +39,10 @@ export type Database = {
           created_at: string | null;
           current_message_leaf_id: string | null;
           id: string;
+          privacy: Database['public']['Enums']['privacy_type'];
+          settings: Json;
           title: string;
+          type: Database['public']['Enums']['conversation-type'];
           updated_at: string | null;
           user_id: string;
         };
@@ -47,7 +50,10 @@ export type Database = {
           created_at?: string | null;
           current_message_leaf_id?: string | null;
           id?: string;
+          privacy?: Database['public']['Enums']['privacy_type'];
+          settings?: Json;
           title: string;
+          type?: Database['public']['Enums']['conversation-type'];
           updated_at?: string | null;
           user_id: string;
         };
@@ -55,11 +61,93 @@ export type Database = {
           created_at?: string | null;
           current_message_leaf_id?: string | null;
           id?: string;
+          privacy?: Database['public']['Enums']['privacy_type'];
+          settings?: Json;
           title?: string;
+          type?: Database['public']['Enums']['conversation-type'];
           updated_at?: string | null;
           user_id?: string;
         };
         Relationships: [];
+      };
+      images: {
+        Row: {
+          conversation_id: string;
+          created_at: string;
+          id: string;
+          image_generation_call_id: string | null;
+          prompt: Json;
+          status: Database['public']['Enums']['generation-status'];
+          user_id: string;
+        };
+        Insert: {
+          conversation_id: string;
+          created_at?: string;
+          id?: string;
+          image_generation_call_id?: string | null;
+          prompt?: Json;
+          status?: Database['public']['Enums']['generation-status'];
+          user_id: string;
+        };
+        Update: {
+          conversation_id?: string;
+          created_at?: string;
+          id?: string;
+          image_generation_call_id?: string | null;
+          prompt?: Json;
+          status?: Database['public']['Enums']['generation-status'];
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'images_conversation_id_fkey';
+            columns: ['conversation_id'];
+            isOneToOne: false;
+            referencedRelation: 'conversations';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      meshes: {
+        Row: {
+          conversation_id: string;
+          created_at: string;
+          file_type: Database['public']['Enums']['mesh_file_type'];
+          id: string;
+          images: string[] | null;
+          prompt: Json;
+          status: Database['public']['Enums']['generation-status'];
+          user_id: string;
+        };
+        Insert: {
+          conversation_id: string;
+          created_at?: string;
+          file_type?: Database['public']['Enums']['mesh_file_type'];
+          id?: string;
+          images?: string[] | null;
+          prompt?: Json;
+          status?: Database['public']['Enums']['generation-status'];
+          user_id: string;
+        };
+        Update: {
+          conversation_id?: string;
+          created_at?: string;
+          file_type?: Database['public']['Enums']['mesh_file_type'];
+          id?: string;
+          images?: string[] | null;
+          prompt?: Json;
+          status?: Database['public']['Enums']['generation-status'];
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'meshes_conversation_id_fkey';
+            columns: ['conversation_id'];
+            isOneToOne: false;
+            referencedRelation: 'conversations';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       messages: {
         Row: {
@@ -68,6 +156,7 @@ export type Database = {
           created_at: string;
           id: string;
           parent_message_id: string | null;
+          rating: number;
           role: string;
         };
         Insert: {
@@ -76,6 +165,7 @@ export type Database = {
           created_at?: string;
           id?: string;
           parent_message_id?: string | null;
+          rating?: number;
           role: string;
         };
         Update: {
@@ -84,6 +174,7 @@ export type Database = {
           created_at?: string;
           id?: string;
           parent_message_id?: string | null;
+          rating?: number;
           role?: string;
         };
         Relationships: [
@@ -96,18 +187,186 @@ export type Database = {
           },
         ];
       };
+      previews: {
+        Row: {
+          conversation_id: string;
+          created_at: string;
+          id: string;
+          mesh_id: string;
+          status: Database['public']['Enums']['generation-status'];
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          conversation_id: string;
+          created_at?: string;
+          id?: string;
+          mesh_id: string;
+          status?: Database['public']['Enums']['generation-status'];
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          conversation_id?: string;
+          created_at?: string;
+          id?: string;
+          mesh_id?: string;
+          status?: Database['public']['Enums']['generation-status'];
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'previews_conversation_id_fkey';
+            columns: ['conversation_id'];
+            isOneToOne: false;
+            referencedRelation: 'conversations';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'previews_mesh_id_fkey';
+            columns: ['mesh_id'];
+            isOneToOne: false;
+            referencedRelation: 'meshes';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      profiles: {
+        Row: {
+          avatar_path: string | null;
+          created_at: string;
+          full_name: string;
+          id: string;
+          notifications_enabled: boolean;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          avatar_path?: string | null;
+          created_at?: string;
+          full_name: string;
+          id?: string;
+          notifications_enabled?: boolean;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          avatar_path?: string | null;
+          created_at?: string;
+          full_name?: string;
+          id?: string;
+          notifications_enabled?: boolean;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      prompts: {
+        Row: {
+          created_at: string;
+          id: number;
+          type: Database['public']['Enums']['prompt_type'];
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: number;
+          type?: Database['public']['Enums']['prompt_type'];
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: number;
+          type?: Database['public']['Enums']['prompt_type'];
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      subscriptions: {
+        Row: {
+          created_at: string | null;
+          id: string;
+          level: Database['public']['Enums']['stripe-level'];
+          status: string | null;
+          stripe_customer_id: string | null;
+          stripe_subscription_id: string | null;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string | null;
+          id?: string;
+          level?: Database['public']['Enums']['stripe-level'];
+          status?: string | null;
+          stripe_customer_id?: string | null;
+          stripe_subscription_id?: string | null;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string | null;
+          id?: string;
+          level?: Database['public']['Enums']['stripe-level'];
+          status?: string | null;
+          stripe_customer_id?: string | null;
+          stripe_subscription_id?: string | null;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      trial_users: {
+        Row: {
+          id: string;
+          user_id: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      create_conversation_from_featured: {
+        Args: { featured_id_input: string; title_input: string };
+        Returns: string;
+      };
+      create_featured: {
+        Args: {
+          conversation_id_input: string;
+          title_input: string;
+          description_input: string;
+          image_location_input: string;
+        };
+        Returns: string;
+      };
+      user_extradata: {
+        Args: { user_id_input: string };
+        Returns: Database['public']['CompositeTypes']['user_data'];
+      };
     };
     Enums: {
-      [_ in never]: never;
+      'conversation-type': 'parametric' | 'creative';
+      'generation-status': 'pending' | 'success' | 'failure';
+      mesh_file_type: 'glb' | 'stl' | 'obj' | 'fbx';
+      mesh_model_type: 'quality' | 'fast';
+      privacy_type: 'public' | 'private';
+      prompt_type: 'mesh' | 'image' | 'chat';
+      'stripe-level': 'pro' | 'standard';
+      subscription_level: 'pro' | 'standard' | 'free';
     };
     CompositeTypes: {
-      [_ in never]: never;
+      user_data: {
+        hasTrialed: boolean | null;
+        sublevel: Database['public']['Enums']['subscription_level'] | null;
+        generationsRemaining: number | null;
+      };
     };
   };
 };
@@ -237,6 +496,15 @@ export const Constants = {
     Enums: {},
   },
   public: {
-    Enums: {},
+    Enums: {
+      'conversation-type': ['parametric', 'creative'],
+      'generation-status': ['pending', 'success', 'failure'],
+      mesh_file_type: ['glb', 'stl', 'obj', 'fbx'],
+      mesh_model_type: ['quality', 'fast'],
+      privacy_type: ['public', 'private'],
+      prompt_type: ['mesh', 'image', 'chat'],
+      'stripe-level': ['pro', 'standard'],
+      subscription_level: ['pro', 'standard', 'free'],
+    },
   },
 } as const;

@@ -6,11 +6,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { useColor } from '@/contexts/ColorContext';
 
-export function ColorPicker() {
+interface ColorPickerProps {
+  color: string;
+  onChange: (color: string) => void;
+}
+
+export function ColorPicker({ color, onChange }: ColorPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const { color, setColor } = useColor();
   const [inputValue, setInputValue] = useState(color.replace('#', ''));
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [popoverWidth, setPopoverWidth] = useState<number | undefined>(
@@ -24,7 +27,7 @@ export function ColorPicker() {
       setInputValue(value);
       // Only update the actual color when we have a valid 6-character hex
       if (value.length === 6) {
-        setColor(`#${value}`);
+        onChange(`#${value}`);
       }
     }
   };
@@ -74,7 +77,7 @@ export function ColorPicker() {
                   e.stopPropagation();
                   e.currentTarget.select();
                 }}
-                className="cursor-text rounded-md bg-transparent px-2 py-0.5 leading-none text-adam-text-primary outline-none transition-colors duration-200 ease-out selection:bg-[#FF70AC7A] selection:text-white focus:bg-adam-neutral-900 [@media(hover:hover)]:hover:bg-adam-neutral-950/50"
+                className="cursor-text rounded-md bg-transparent px-2 py-0.5 leading-none text-adam-text-primary outline-none transition-colors duration-200 ease-out selection:bg-[#70B8FF7A] selection:text-white focus:bg-adam-neutral-900 [@media(hover:hover)]:hover:bg-adam-neutral-950/50"
                 style={{
                   width: `calc(${Math.max(1, inputValue.length)}ch + 1rem)`,
                 }}
@@ -99,7 +102,7 @@ export function ColorPicker() {
         <div className="flex flex-col gap-3">
           <HexColorPicker
             color={color}
-            onChange={(newColor) => setColor(newColor.toUpperCase())}
+            onChange={(newColor) => onChange(newColor.toUpperCase())}
             style={{ height: '120px', width: '100%' }}
           />
         </div>

@@ -165,30 +165,20 @@ export async function formatUserMessage(
     }
   }
 
-  // Handle STL mesh uploads with auto-generated renders
-  if (message.content.meshRenders?.length && message.content.meshBoundingBox) {
+  // Handle mesh uploads with parametric enrichments (bounding box + render images)
+  if (message.content.mesh && message.content.meshBoundingBox) {
     const bbox = message.content.meshBoundingBox;
     const filename = message.content.meshFilename || 'model.stl';
-    const renderFiles = message.content.meshRenders.map(
-      (renderId) => `${userId}/${conversationId}/${renderId}`,
-    );
-    const base64Renders = await getBase64Images(
-      supabaseClient,
-      'images',
-      renderFiles,
-    );
 
-    if (base64Renders.length > 0) {
-      // Calculate model height after rotation (Y becomes Z when rotated 90 degrees on X)
-      const modelHeight = bbox.y;
-      const modelWidth = bbox.x;
-      const modelDepth = bbox.z;
+    const modelHeight = bbox.y;
+    const modelWidth = bbox.x;
+    const modelDepth = bbox.z;
 
-      const instruction = `User uploaded a 3D model (STL file): "${filename}"
+    const instruction = `User uploaded a 3D model (STL file): "${filename}"
 
 **MODEL DIMENSIONS (CRITICAL FOR POSITIONING):**
 - Width (X): ${modelWidth.toFixed(1)}mm
-- Height (Z after rotation): ${modelHeight.toFixed(1)}mm  
+- Height (Z after rotation): ${modelHeight.toFixed(1)}mm
 - Depth (Y after rotation): ${modelDepth.toFixed(1)}mm
 
 The model is CENTERED at origin. After rotation:
@@ -219,26 +209,49 @@ union() {
         cylinder(h=10, d1=20, d2=5); // Hat above the model
 }
 
-The images show the model from: isometric, top, front, right views:`;
+The render images show the model from: isometric, top, front, right views.`;
 
+    parts.push({
+      type: 'text',
+      text: instruction,
+    });
+  } else if (message.content.mesh) {
+    // Mesh without bounding box — simple preview (like creative mode)
+    const previewSignedUrl = await getSignedUrl(
+      supabaseClient,
+      'images',
+      `${userId}/${conversationId}/preview-${message.content.mesh.id}`,
+    );
+
+    if (previewSignedUrl) {
       parts.push({
         type: 'text',
-        text: instruction,
+        text: `User uploaded a 3D mesh file (ID: ${message.content.mesh.id}, type: ${message.content.mesh.fileType})`,
       });
-      parts.push(
-        ...base64Renders.map((image) => ({
-          type: 'image' as const,
-          source: {
-            type: 'base64' as const,
-            media_type: image.mediaType as
-              | 'image/jpeg'
-              | 'image/png'
-              | 'image/gif'
-              | 'image/webp',
-            data: image.data.split(',')[1],
-          },
-        })),
-      );
+      const base64Preview = await getBase64Images(supabaseClient, 'images', [
+        `${userId}/${conversationId}/preview-${message.content.mesh.id}`,
+      ]);
+      if (base64Preview.length > 0) {
+        parts.push(
+          ...base64Preview.map((image) => ({
+            type: 'image' as const,
+            source: {
+              type: 'base64' as const,
+              media_type: image.mediaType as
+                | 'image/jpeg'
+                | 'image/png'
+                | 'image/gif'
+                | 'image/webp',
+              data: image.data.split(',')[1],
+            },
+          })),
+        );
+      }
+    } else {
+      parts.push({
+        type: 'text',
+        text: `User uploaded a 3D mesh file (ID: ${message.content.mesh.id}, type: ${message.content.mesh.fileType})`,
+      });
     }
   }
 

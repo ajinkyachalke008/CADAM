@@ -3,6 +3,7 @@ import {
   Clock,
   MoreVertical,
   Trash2,
+  LockKeyhole,
   Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,13 +25,24 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { formatDistanceToNow } from 'date-fns';
-import { HistoryConversation } from '@/types/misc';
+import { HistoryConversation } from '../../types/misc.ts';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Link } from 'react-router-dom';
+import { GoodEarth } from '../icons/ui/GoodEarth';
 
 interface ConversationCardProps {
   conversation: HistoryConversation;
   onDelete: (conversationId: string) => void;
   onRename: (conversationId: string, newTitle: string) => void;
+  onTogglePrivacy: (
+    conversationId: string,
+    newPrivacy: 'public' | 'private',
+  ) => void;
   isEditing: boolean;
 }
 
@@ -38,6 +50,7 @@ export function ConversationCard({
   conversation,
   onDelete,
   onRename,
+  onTogglePrivacy,
   isEditing,
 }: ConversationCardProps) {
   return (
@@ -57,6 +70,26 @@ export function ConversationCard({
               <h3 className="line-clamp-1 text-wrap break-all text-base font-medium text-adam-neutral-50">
                 {conversation.title}
               </h3>
+              {conversation.privacy === 'public' && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <GoodEarth className="h-4 w-4 text-adam-neutral-50" />
+                    </TooltipTrigger>
+                    <TooltipContent>Public</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {conversation.privacy === 'private' && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <LockKeyhole className="h-4 w-4 text-adam-neutral-50" />
+                    </TooltipTrigger>
+                    <TooltipContent>Private</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
             <div className="flex items-center gap-4 text-xs font-normal text-adam-neutral-400">
               <span className="flex items-center">
@@ -69,6 +102,17 @@ export function ConversationCard({
                 <MessageSquare className="mr-1 h-3 w-3 text-xs text-adam-neutral-400" />
                 {conversation.message_count} messages
               </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {conversation.type === 'parametric' ? (
+                <div className="rounded-full bg-[#0061FF24] px-2 py-1 text-xs font-normal text-[#6183FF]">
+                  Parametric
+                </div>
+              ) : (
+                <div className="rounded-full bg-[#00A6FF29] px-2 py-1 text-xs font-normal text-[#38B6FF]">
+                  Creative
+                </div>
+              )}
             </div>
           </div>
         </Button>
@@ -94,6 +138,29 @@ export function ConversationCard({
                     Delete
                   </DropdownMenuItem>
                 </AlertDialogTrigger>
+                {conversation.privacy === 'private' ? (
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePrivacy(conversation.id, 'public');
+                    }}
+                    className="text-adam-neutral-50 hover:cursor-pointer hover:bg-adam-neutral-950 hover:text-adam-neutral-50 focus:bg-adam-neutral-950 focus:text-adam-neutral-50"
+                  >
+                    <GoodEarth className="mr-2 h-4 w-4" />
+                    Make Public
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePrivacy(conversation.id, 'private');
+                    }}
+                    className="text-adam-neutral-50 hover:cursor-pointer hover:bg-adam-neutral-950 hover:text-adam-neutral-50 focus:bg-adam-neutral-950 focus:text-adam-neutral-50"
+                  >
+                    <LockKeyhole className="mr-2 h-4 w-4" />
+                    Make Private
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();

@@ -1,8 +1,15 @@
 import { Button } from '@/components/ui/button';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useRouteError } from 'react-router-dom';
+import * as Sentry from '@sentry/react';
+import { useEffect } from 'react';
 
 export function ErrorView() {
+  const error = useRouteError();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    Sentry.captureException(error);
+  }, [error]);
 
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-adam-bg-secondary-dark">

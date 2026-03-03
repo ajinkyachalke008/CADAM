@@ -73,7 +73,6 @@ export function useOpenSCAD() {
       workerRef.current?.terminate();
       workerRef.current = null;
       writtenFilesRef.current.clear();
-      // Reject any pending requests on cleanup
       pendingRequestsRef.current.forEach((pending) => {
         pending.reject(new Error('Worker terminated'));
       });
@@ -87,13 +86,10 @@ export function useOpenSCAD() {
     async (path: string, content: Blob | File): Promise<void> => {
       const worker = getWorker();
 
-      // Get the ArrayBuffer (this creates a copy)
       const arrayBuffer = await content.arrayBuffer();
 
-      // Generate unique ID for this request
       const requestId = `fs-write-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-      // Create promise that will resolve when worker responds
       const responsePromise = new Promise<void>((resolve, reject) => {
         pendingRequestsRef.current.set(requestId, {
           resolve: () => resolve(),
@@ -114,33 +110,11 @@ export function useOpenSCAD() {
       // Transfer the ArrayBuffer to the worker (zero-copy transfer)
       worker.postMessage(message, [arrayBuffer]);
 
-      // Wait for worker to confirm the write
       await responsePromise;
       writtenFilesRef.current.add(path);
     },
     [getWorker],
   );
-
-  // Remove a file from the worker filesystem
-  const unlinkFile = useCallback(
-    (path: string): void => {
-      const worker = getWorker();
-
-      const message: WorkerMessage = {
-        type: WorkerMessageType.FS_UNLINK,
-        data: { path },
-      };
-
-      worker.postMessage(message);
-      writtenFilesRef.current.delete(path);
-    },
-    [getWorker],
-  );
-
-  // Check if a file has been written to the worker
-  const hasFile = useCallback((path: string): boolean => {
-    return writtenFilesRef.current.has(path);
-  }, []);
 
   const compileScad = useCallback(
     async (code: string) => {
@@ -149,7 +123,6 @@ export function useOpenSCAD() {
       setIsError(false);
 
       const worker = getWorker();
-      // Note: Event listener is already added in useEffect, no need to add again
 
       const message: WorkerMessage = {
         type: WorkerMessageType.PREVIEW,
@@ -168,8 +141,6 @@ export function useOpenSCAD() {
   return {
     compileScad,
     writeFile,
-    unlinkFile,
-    hasFile,
     isCompiling,
     output,
     error,

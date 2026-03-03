@@ -2,10 +2,9 @@ import { Check, DownloadIcon, Frown, Loader2, PlusIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useItemSelection } from '@/hooks/useItemSelection';
 import { cn } from '@/lib/utils';
-import { useConversation } from '@/services/conversationService';
+import { useImageData } from '@/hooks/useImageData';
+import { useConversation } from '@/contexts/ConversationContext';
 import { getSafeFilename } from '@/utils/file-utils';
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
 
 export function ImageViewer({
   image,
@@ -22,27 +21,10 @@ export function ImageViewer({
   const { images, selectItem } = useItemSelection();
   const { conversation } = useConversation();
 
-  const { data: imageUrl, isLoading: isImageLoading } = useQuery({
-    queryKey: ['image', conversation.user_id, conversation.id, image],
-    enabled: !!image,
-    queryFn: async () => {
-      const reader = new FileReader();
-      const { data } = await supabase.storage
-        .from('images')
-        .download(`${conversation.user_id}/${conversation.id}/${image}`);
-      if (!data) {
-        throw new Error('Failed to download image');
-      }
-      const urlPromise = new Promise((resolve) => {
-        reader.onload = () => {
-          resolve(reader.result as string);
-        };
-      });
-      reader.readAsDataURL(data);
-      const url = (await urlPromise) as string;
-      return { image, url };
-    },
-  });
+  const {
+    data: { data: imageData, isLoading: isImageDataLoading },
+    url: { data: imageUrl, isLoading: isImageLoading },
+  } = useImageData(image);
 
   const handleDownload = () => {
     const link = document.createElement('a');
@@ -59,7 +41,21 @@ export function ImageViewer({
     [images, image],
   );
 
-  if (isImageLoading) {
+  if (imageData?.status === 'failure') {
+    return (
+      <div
+        className={cn(
+          'flex aspect-square h-full w-full flex-col items-center justify-center gap-2 rounded-lg text-adam-text-primary',
+          className,
+        )}
+      >
+        <Frown className="h-10 w-10" />
+        <span>Image generation failed</span>
+      </div>
+    );
+  }
+
+  if (isImageDataLoading || isImageLoading || imageData?.status === 'pending') {
     return (
       <div
         className={cn(
@@ -127,11 +123,10 @@ export function ImageViewer({
               className={`absolute left-2 top-2 z-10 rounded-full p-1 ${isSelected ? 'bg-adam-blue' : 'bg-black'} cursor-pointer transition-transform duration-200 hover:scale-110 ${isSelected ? 'opacity-100' : hoverable ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}
               onClick={(e) => {
                 e.stopPropagation();
-                selectItem({
-                  id: image,
-                  source: 'selection',
-                  url: imageUrl.url,
-                });
+                selectItem(
+                  { id: image, source: 'selection', url: imageUrl.url },
+                  'image',
+                );
               }}
             >
               {isSelected && <Check className="h-4 w-4 text-white" />}

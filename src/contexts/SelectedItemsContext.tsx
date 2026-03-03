@@ -1,18 +1,18 @@
-import { MessageItem, MeshUploadState } from '@/types/misc';
+import { MessageItem } from '../types/misc.ts';
 import { createContext, Dispatch, SetStateAction, useContext } from 'react';
 
 type SelectedItemsContextType = {
   images: MessageItem[];
+  mesh: MessageItem | null;
   setImages: Dispatch<SetStateAction<MessageItem[]>>;
-  meshUpload: MeshUploadState | null;
-  setMeshUpload: Dispatch<SetStateAction<MeshUploadState | null>>;
+  setMesh: Dispatch<SetStateAction<MessageItem | null>>;
 };
 
 export const SelectedItemsContext = createContext<SelectedItemsContextType>({
   images: [],
+  mesh: null,
   setImages: () => {},
-  meshUpload: null,
-  setMeshUpload: () => {},
+  setMesh: () => {},
 });
 
 export const useSelectedItems = () => {

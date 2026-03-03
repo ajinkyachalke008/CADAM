@@ -1,86 +1,115 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, LayoutGrid } from 'lucide-react';
+import { Menu, Plus, LogOut, Crown, Settings, LayoutGrid } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from './ui/sheet';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { useQuery } from '@tanstack/react-query';
 import { ConditionalWrapper } from './ConditionalWrapper';
-import { Conversation } from '@shared/types';
-import { AuthButton } from './auth/AuthButton';
+import { DiscordIcon, GitHubIcon } from './icons/CompanyIcons';
+import { cn } from '@/lib/utils';
+import { Conversation, ConversationSettings } from '@shared/types';
+import { UserAvatar } from '@/components/chat/UserAvatar';
+import { useProfile } from '@/services/profileService';
 
 interface SidebarProps {
   isSidebarOpen: boolean;
+  setIsSidebarOpen: (open: boolean) => void;
 }
 
-export function Sidebar({ isSidebarOpen }: SidebarProps) {
+function DesktopSidebar({ isSidebarOpen, setIsSidebarOpen }: SidebarProps) {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
+  const isMobile = useIsMobile();
+  const { data: profile } = useProfile();
 
+  // Get 10 most recent conversations
   const { data: recentConversations } = useQuery<Conversation[]>({
     queryKey: ['conversations', 'recent'],
     initialData: [],
     queryFn: async () => {
-      const { data: conversations, error } = await supabase
+      const { data, error } = await supabase
         .from('conversations')
         .select('*')
         .order('updated_at', { ascending: false })
         .eq('user_id', user?.id ?? '')
-        .limit(10);
+        .limit(10)
+        .overrideTypes<Array<{ settings: ConversationSettings }>>();
 
       if (error) throw error;
 
-      const conversationsWithTitles = await Promise.all(
-        (conversations || []).map(async (conv) => {
-          if (
-            conv.title &&
-            conv.title.toLowerCase() !== 'new conversation' &&
-            conv.title.toLowerCase() !== 'untitled' &&
-            conv.title.toLowerCase() !== 'conversation'
-          ) {
-            return conv;
-          }
-
-          const { data: messages } = await supabase
-            .from('messages')
-            .select('content')
-            .eq('conversation_id', conv.id)
-            .eq('role', 'user')
-            .order('created_at', { ascending: true })
-            .limit(1);
-
-          if (messages && messages.length > 0) {
-            const firstMessage = messages[0];
-            let text = '';
-            if (
-              firstMessage.content &&
-              typeof firstMessage.content === 'object' &&
-              'text' in firstMessage.content
-            ) {
-              text = String(firstMessage.content.text || '');
-            }
-            const preview = text.substring(0, 40).trim();
-            return {
-              ...conv,
-              title: preview || conv.title || 'Untitled Creation',
-            };
-          }
-
-          return conv;
-        }),
-      );
-
-      return conversationsWithTitles;
+      return data;
     },
   });
 
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      navigate('/signin');
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
+
+  const sidebarNavigate = (path: string) => {
+    if (isMobile) {
+      setIsSidebarOpen(false); // setIsSidebarOpen is actually setOpen from Sheet component
+    }
+    navigate(path);
+  };
+
+  const renderUserSectionTrigger = () => {
+    if (isSidebarOpen) {
+      return (
+        <div className="flex cursor-pointer items-center space-x-3 rounded-md px-2 py-1.5 transition-colors hover:bg-accent-foreground">
+          <UserAvatar />
+          <div className="flex flex-col">
+            <span className="text-sm font-medium text-adam-text-primary">
+              {profile?.full_name || user?.email?.split('@')[0] || 'User'}
+            </span>
+            <span className="text-xs text-adam-text-tertiary dark:text-gray-400">
+              {user?.email}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <Button
+        variant="adam_dark_collapsed_avatar"
+        className="group ml-[1px] h-[46px] w-[46px] px-0 py-6"
+      >
+        <UserAvatar className="h-[30px] w-[30px] transition-all duration-200 ease-in-out group-hover:h-[26px] group-hover:w-[26px] group-hover:ring-2 group-hover:ring-adam-neutral-500" />
+      </Button>
+    );
+  };
+
   return (
     <div
-      className={`${isSidebarOpen ? 'w-64' : 'w-16'} flex h-full flex-shrink-0 flex-col bg-adam-bg-dark pb-2 transition-all duration-300 ease-in-out`}
+      className={`${isSidebarOpen ? 'w-64' : 'w-16'} flex h-full flex-shrink-0 flex-col bg-adam-bg-dark pb-2 transition-all duration-300 ease-in-out dark:bg-gray-950`}
     >
       <div className="p-4 dark:border-gray-800">
         <ConditionalWrapper
@@ -96,7 +125,10 @@ export function Sidebar({ isSidebarOpen }: SidebarProps) {
           )}
         >
           <Link to="/">
-            <div className="flex cursor-pointer items-center space-x-2">
+            <div
+              className="flex cursor-pointer items-center space-x-2"
+              onClick={() => sidebarNavigate('/')}
+            >
               {isSidebarOpen ? (
                 <div className="flex w-full">
                   <img
@@ -143,7 +175,7 @@ export function Sidebar({ isSidebarOpen }: SidebarProps) {
                     ? 'flex w-[216px] items-center justify-start gap-2 rounded-[100px] border border-adam-blue bg-adam-background-1 px-4 py-3 text-[#D7D7D7] hover:bg-adam-blue/40 hover:text-adam-text-primary'
                     : 'flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border-2 border-adam-blue bg-[#191A1A] p-[2px] text-[#D7D7D7] shadow-[0px_4px_10px_0px_rgba(0,166,255,0.24)] hover:bg-adam-blue/40 hover:text-adam-text-primary'
                 } mb-4`}
-                onClick={() => navigate('/')}
+                onClick={() => sidebarNavigate('/')}
               >
                 <Plus
                   className={`h-5 w-5 ${!isSidebarOpen ? 'text-adam-neutral-300 hover:text-adam-text-primary' : ''}`}
@@ -186,6 +218,7 @@ export function Sidebar({ isSidebarOpen }: SidebarProps) {
                       variant={
                         isSidebarOpen ? 'adam_dark' : 'adam_dark_collapsed'
                       }
+                      onClick={() => sidebarNavigate(href)}
                       className={`${isSidebarOpen ? 'w-full justify-start' : 'ml-[1px] h-[46px] w-[46px] p-0'}`}
                     >
                       <Icon
@@ -208,6 +241,11 @@ export function Sidebar({ isSidebarOpen }: SidebarProps) {
                           <Link
                             to={`/editor/${conversation.id}`}
                             key={conversation.id}
+                            onClick={() => {
+                              if (isMobile) {
+                                setIsSidebarOpen(false);
+                              }
+                            }}
                           >
                             <li key={conversation.id}>
                               <span className="line-clamp-1 text-ellipsis text-nowrap rounded-md p-1 text-xs font-medium text-adam-neutral-400 transition-colors duration-200 ease-in-out [@media(hover:hover)]:hover:bg-adam-neutral-950 [@media(hover:hover)]:hover:text-adam-neutral-10">
@@ -224,48 +262,201 @@ export function Sidebar({ isSidebarOpen }: SidebarProps) {
             ))}
           </nav>
         </div>
+
         <div
-          className={`${isSidebarOpen ? 'px-4' : 'px-2'} py-2 transition-all duration-300 ease-in-out`}
+          className={`${isSidebarOpen ? 'px-4' : 'px-2'} py-4 transition-all duration-300 ease-in-out dark:border-gray-800`}
         >
-          <ConditionalWrapper
-            condition={!isSidebarOpen}
-            wrapper={(children) => (
+          <div className={cn('flex flex-col gap-2', isSidebarOpen && 'gap-3')}>
+            {/* GitHub Button - Collapsed state */}
+            {!isSidebarOpen && (
               <Tooltip>
-                <TooltipTrigger asChild>{children}</TooltipTrigger>
+                <TooltipTrigger asChild>
+                  <a
+                    href="https://github.com/Adam-CAD/CADAM"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Button
+                      variant="adam_dark_collapsed"
+                      className="mb-0 ml-[1px] h-[46px] w-[46px] p-0"
+                    >
+                      <GitHubIcon className="h-[22px] w-[22px]" />
+                    </Button>
+                  </a>
+                </TooltipTrigger>
                 <TooltipContent side="right" className="flex flex-col">
                   <span className="font-semibold">GitHub</span>
                   <span className="text-xs text-muted-foreground">
-                    GitHub Repository
+                    View source code
                   </span>
                 </TooltipContent>
               </Tooltip>
             )}
-          >
-            <Link to="https://github.com/Adam-CAD/CADAM" target="_blank">
-              <Button
-                variant={isSidebarOpen ? 'adam_dark' : 'adam_dark_collapsed'}
-                className={`${isSidebarOpen ? 'mb-1 w-full justify-start' : 'ml-[1px] h-[46px] w-[46px] p-0'}`}
+
+            {/* GitHub Button - Expanded state */}
+            {isSidebarOpen && (
+              <a
+                href="https://github.com/Adam-CAD/CADAM"
+                target="_blank"
+                rel="noopener noreferrer"
               >
-                <div
-                  className={`${isSidebarOpen ? 'mr-2' : ''} h-[22px] w-[22px] min-w-[22px]`}
+                <Button
+                  variant="adam_dark"
+                  className="flex h-10 w-full items-center justify-start gap-2"
                 >
-                  <svg
-                    role="img"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg"
+                  <GitHubIcon className="h-[22px] w-[22px] min-w-[22px]" />
+                  GitHub
+                </Button>
+              </a>
+            )}
+
+            {/* Discord Button - Collapsed state */}
+            {!isSidebarOpen && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <a
+                    href="https://discord.com/invite/HKdXDqAHCs"
+                    target="_blank"
+                    rel="noopener noreferrer"
                   >
-                    <title>GitHub</title>
-                    <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
-                  </svg>
+                    <Button
+                      variant="adam_dark_collapsed"
+                      className="mb-0 ml-[1px] h-[46px] w-[46px] p-0"
+                    >
+                      <DiscordIcon className="h-[22px] w-[22px]" />
+                    </Button>
+                  </a>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="flex flex-col">
+                  <span className="font-semibold">Discord</span>
+                  <span className="text-xs text-muted-foreground">
+                    Join our community
+                  </span>
+                </TooltipContent>
+              </Tooltip>
+            )}
+
+            {/* Discord Button - Expanded state */}
+            {isSidebarOpen && (
+              <a
+                href="https://discord.com/invite/HKdXDqAHCs"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button
+                  variant="adam_dark"
+                  className="flex h-10 w-full items-center justify-start gap-2"
+                >
+                  <DiscordIcon className="h-[22px] w-[22px] min-w-[22px]" />
+                  Discord
+                </Button>
+              </a>
+            )}
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                {renderUserSectionTrigger()}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                className="w-56"
+                align="end"
+                side={isMobile ? 'top' : 'right'}
+              >
+                <div className="flex items-center space-x-2 p-2">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium text-adam-text-primary">
+                      {profile?.full_name ||
+                        user?.email?.split('@')[0] ||
+                        'User'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {user?.email}
+                    </p>
+                  </div>
                 </div>
-                {isSidebarOpen && 'GitHub'}
-              </Button>
-            </Link>
-          </ConditionalWrapper>
-          <AuthButton isSidebarOpen={isSidebarOpen} />
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup className="text-adam-text-primary">
+                  <DropdownMenuItem asChild>
+                    <Link to="/settings" className="flex items-center">
+                      <Settings className="mr-2 h-4 w-4" />
+                      <span>Settings</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => sidebarNavigate('/subscription')}
+                  >
+                    <Crown className="mr-2 h-4 w-4" />
+                    <span>Subscriptions</span>
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleSignOut}>
+                  <LogOut className="mr-2 h-4 w-4 text-adam-text-primary" />
+                  <span className="text-adam-text-primary">Sign out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function MobileSidebar({
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  isSidebarOpen,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  setIsSidebarOpen,
+}: SidebarProps) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="fixed left-2 top-2.5 z-50 hover:bg-adam-neutral-700 md:hidden"
+        >
+          <Menu className="h-5 w-5 text-adam-text-primary" />
+        </Button>
+      </SheetTrigger>
+      <SheetContent
+        side="left"
+        className="bg-adam-bg-dark p-0 [&>button]:text-white"
+      >
+        {/* For aria stuff */}
+        <SheetHeader className="hidden">
+          <SheetTitle className="text-adam-text-primary">AdamCAD</SheetTitle>
+          <SheetDescription>
+            AI-powered CAD software for everyone
+          </SheetDescription>
+        </SheetHeader>
+        <DesktopSidebar isSidebarOpen={true} setIsSidebarOpen={setOpen} />
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+export function Sidebar({ isSidebarOpen, setIsSidebarOpen }: SidebarProps) {
+  const isMobile = useIsMobile();
+  const { user } = useAuth();
+
+  // Don't display the sidebar if the user isn't logged in
+  if (user == null) {
+    return <></>;
+  }
+
+  return isMobile ? (
+    <MobileSidebar
+      isSidebarOpen={isSidebarOpen}
+      setIsSidebarOpen={setIsSidebarOpen}
+    />
+  ) : (
+    <DesktopSidebar
+      isSidebarOpen={isSidebarOpen}
+      setIsSidebarOpen={setIsSidebarOpen}
+    />
   );
 }

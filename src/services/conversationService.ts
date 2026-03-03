@@ -11,6 +11,9 @@ const defaultConversation: Conversation = {
   user_id: '',
   created_at: '',
   updated_at: '',
+  privacy: 'private',
+  type: 'parametric',
+  settings: null,
 };
 
 export function useConversation() {
@@ -37,12 +40,13 @@ export function useConversation() {
           .eq('id', conversationId)
           .eq('user_id', user.id)
           .limit(1)
-          .single();
+          .single()
+          .overrideTypes<Conversation>();
 
         if (error) {
           throw error;
         }
-        return data;
+        return data as Conversation;
       },
     });
 

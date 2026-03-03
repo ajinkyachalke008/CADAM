@@ -1,39 +1,48 @@
 # For detailed configuration reference documentation, visit:
 # https://supabase.com/docs/guides/local-development/cli/config
-
+# A string used to distinguish different Supabase projects on the same host. Defaults to the
+# working directory name when running `supabase init`.
 project_id = "cadam"
 
-[realtime]
-enabled = false
-
-[inbucket]
-enabled = true
-
-[storage]
-enabled = true
-file_size_limit = "50MiB"
-
-[storage.buckets.images]
-public = false
-file_size_limit = "50MiB"
-# Allow images and STL files (STL often comes as application/octet-stream)
-allowed_mime_types = ["image/png", "image/jpeg", "image/jpg", "image/webp", "model/stl", "application/sla", "application/octet-stream"]
-
-[auth]
-enable_anonymous_sign_ins = true
-enable_manual_linking = true
-
 [auth.email]
-enable_confirmations = true
+enable_signup = true
 
 [auth.external.google]
 enabled = true
 client_id = "env(GOOGLE_CLIENT_ID)"
 secret = "env(GOOGLE_SECRET)"
 
-[functions.chat]
+[edge_runtime]
+enabled = true
+policy = "per_worker"
+
+[functions.stripe-webhook]
+enabled = true
+verify_jwt = false
+
+[functions.parametric-chat]
 enabled = true
 verify_jwt = true
+
+[functions.stripe-create-checkout-session]
+enabled = true
+verify_jwt = true
+
+[functions.stripe-create-portal-session]
+enabled = true
+verify_jwt = true
+
+[functions.images]
+enabled = true
+verify_jwt = true
+
+[functions.mesh]
+enabled = true
+verify_jwt = true
+
+[functions.jackson-pollock]
+enabled = true
+verify_jwt = false
 
 [functions.title-generator]
 enabled = true
@@ -42,3 +51,27 @@ verify_jwt = true
 [functions.prompt-generator]
 enabled = true
 verify_jwt = true
+
+[functions.delete-user]
+enabled = true
+verify_jwt = true
+
+[functions.fal-webhook]
+enabled = true
+verify_jwt = false
+import_map = "./functions/fal-webhook/deno.json"
+
+[functions.creative-chat]
+enabled = true
+verify_jwt = true
+import_map = "./functions/creative-chat/deno.json"
+entrypoint = "./functions/creative-chat/index.ts"
+
+[db.migrations]
+schema_paths = [
+  "./schemas/types.sql",
+  "./schemas/conversations.sql",
+  "./schemas/subscriptions.sql",
+  "./schemas/prompts.sql",
+  "./schemas/*.sql",
+]

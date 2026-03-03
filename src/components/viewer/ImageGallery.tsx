@@ -1,14 +1,14 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useCurrentMessage } from '@/contexts/CurrentMessageContext';
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-} from '@/components/ui/carousel';
-import type { CarouselApi } from '@/components/ui/carousel';
+import { Carousel, CarouselContent, CarouselItem } from '../ui/carousel';
+import type { CarouselApi } from '../ui/carousel';
 import { cn } from '@/lib/utils';
 import { ImageViewer } from '@/components/ImageViewer';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { useImagesData } from '@/hooks/useImageData';
+import { CreativeLoadingBar } from '@/components/viewer/CreativeLoadingBar';
+import { CreativeModel } from '@shared/types';
 
 export function ImageGallery({ imageIds }: { imageIds: string[] }) {
   const { currentMessage, setCurrentMessage } = useCurrentMessage();
@@ -16,6 +16,19 @@ export function ImageGallery({ imageIds }: { imageIds: string[] }) {
     currentMessage?.content.index ?? 0,
   );
   const [api, setApi] = useState<CarouselApi>();
+  const isMobile = useIsMobile();
+
+  const { data: imagesData, url: imageUrls } = useImagesData(imageIds);
+
+  const isLoading = useMemo(() => {
+    const imagesLoading = imagesData.some((image) => image.isLoading);
+    const imageUrlsLoading = imageUrls.some((image) => image.isLoading);
+    return imagesLoading || imageUrlsLoading;
+  }, [imagesData, imageUrls]);
+
+  const isPending = useMemo(() => {
+    return imagesData.some((image) => image.data?.status === 'pending');
+  }, [imagesData]);
 
   const currentMessageIndex = currentMessage?.content.index ?? currentIndex;
 
@@ -68,6 +81,28 @@ export function ImageGallery({ imageIds }: { imageIds: string[] }) {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex aspect-square w-full items-center justify-center rounded-lg text-adam-text-primary">
+        <Loader2 className="h-10 w-10 animate-spin" />
+      </div>
+    );
+  }
+
+  if (isPending) {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <CreativeLoadingBar
+          modelType="image"
+          startTime={new Date(imagesData[0].data?.created_at ?? '').getTime()}
+          modelName={
+            (imagesData[0].data?.prompt?.model || 'quality') as CreativeModel
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-6 sm:p-8">
       <div className="relative flex w-full max-w-7xl flex-col items-center justify-center gap-2 sm:gap-6">
@@ -96,6 +131,7 @@ export function ImageGallery({ imageIds }: { imageIds: string[] }) {
                     image={imageId}
                     className="shadow-lg"
                     clickable={currentMessageIndex === index}
+                    hoverable={!isMobile}
                   />
                 </div>
               </CarouselItem>

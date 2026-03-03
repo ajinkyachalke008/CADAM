@@ -23,8 +23,6 @@ const buttonVariants = cva(
         secondary:
           'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
-        onboarding:
-          'bg-adam-neutral-900 hover:bg-adam-neutral-950 text-adam-neutral-10 font-light px-4',
         link: 'text-primary underline-offset-4 hover:underline',
         adam_dark:
           'text-adam-text-tertiary border-2 border-transparent transition-all duration-200 ease-in-out [@media(hover:hover)]:hover:bg-adam-neutral-950 [@media(hover:hover)]:hover:text-adam-neutral-10',
@@ -39,7 +37,6 @@ const buttonVariants = cva(
         lg: 'h-10 rounded-md px-8',
         xl: 'h-12 rounded-lg px-10 text-base font-normal',
         icon: 'h-9 w-9',
-        onboarding: 'h-12 text-sm',
       },
     },
     defaultVariants: {

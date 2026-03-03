@@ -8,6 +8,7 @@ import {
   Pencil,
   X,
   Wrench,
+  Box,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -18,29 +19,36 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { useConversation } from '@/services/conversationService';
+import { useConversation } from '@/contexts/ConversationContext';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { useCurrentMessage } from '@/contexts/CurrentMessageContext';
 import { ImageViewer } from '@/components/ImageViewer';
+import { MeshImagePreview } from '@/components/viewer/MeshImagePreview';
 import { TreeNode } from '@shared/Tree';
 import { UserAvatar } from '@/components/chat/UserAvatar';
-import { useEditMessageMutation } from '@/services/messageService';
 
 interface UserMessageProps {
   isLoading: boolean;
   message: TreeNode<Message>;
+  onEdit?: (message: Message) => void;
+  limitReached?: boolean;
 }
 
-export function UserMessage({ message, isLoading }: UserMessageProps) {
+export function UserMessage({
+  message,
+  onEdit,
+  isLoading,
+  limitReached,
+}: UserMessageProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [hovering, setHovering] = useState(false);
   const [copied, setCopied] = useState(false);
   const [input, setInput] = useState(message.content.text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { conversation, updateConversation } = useConversation();
-  const { mutate: editMessage } = useEditMessageMutation();
 
   const changeLeaf = (messageId: string) => {
-    updateConversation({
+    updateConversation?.({
       ...conversation,
       current_message_leaf_id: messageId,
     });
@@ -59,7 +67,7 @@ export function UserMessage({ message, isLoading }: UserMessageProps) {
   });
 
   const handleEdit = () => {
-    editMessage({
+    onEdit?.({
       ...message,
       content: {
         ...message.content,
@@ -103,7 +111,7 @@ export function UserMessage({ message, isLoading }: UserMessageProps) {
       <div
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className="relative flex min-w-0 max-w-[80%] flex-col gap-1"
+        className="relative flex flex-col gap-1"
       >
         {message.content.error ? (
           <div className="rounded-lg bg-adam-bg-secondary-dark">
@@ -120,7 +128,7 @@ export function UserMessage({ message, isLoading }: UserMessageProps) {
               <Wrench className="h-4 w-4 transition-all duration-300 group-hover:rotate-12" />
               <span className="text-xs">Fix with AI</span>
             </div>
-            {hovering && message.siblings.length > 1 && (
+            {hovering && updateConversation && message.siblings.length > 1 && (
               <div className="absolute bottom-[-1.5rem] right-2 flex items-center gap-0.5 rounded-sm border border-adam-neutral-700 bg-adam-bg-secondary-dark p-0.5">
                 <BranchNavigation
                   branches={message.siblings}
@@ -135,13 +143,17 @@ export function UserMessage({ message, isLoading }: UserMessageProps) {
         ) : (
           <>
             <div className="flex flex-wrap gap-1">
+              <UserMessageMeshViewer message={message} />
               <UserMessageImagesViewer message={message} />
             </div>
             {(isEditing || (input && input.length > 0)) && (
               <div
                 className={cn(
-                  'relative grid max-w-full rounded-lg text-white',
-                  (hovering || message.content.images) && 'bg-adam-neutral-800',
+                  'relative grid w-fit rounded-lg text-white',
+                  (hovering ||
+                    message.content.images ||
+                    message.content.mesh) &&
+                    'bg-adam-neutral-800',
                 )}
               >
                 {isEditing && (
@@ -151,53 +163,59 @@ export function UserMessage({ message, isLoading }: UserMessageProps) {
                     onChange={(e) => {
                       setInput(e.target.value);
                     }}
-                    className="block h-auto min-h-0 w-full resize-none overflow-hidden whitespace-pre-line break-all border-none bg-adam-neutral-800 px-3 py-2 text-sm sm:px-4"
+                    className="block h-auto min-h-0 w-full resize-none overflow-hidden whitespace-pre-line break-words border-none bg-adam-neutral-800 px-3 py-2 text-sm sm:px-4"
                     rows={1}
                     style={{ gridArea: '1 / -1' }}
                   />
                 )}
                 <div
                   className={cn(
-                    'pointer-events-none col-start-1 row-start-1 overflow-hidden whitespace-pre-wrap break-all px-3 py-2 text-sm sm:px-4',
+                    'pointer-events-none col-start-1 row-start-1 overflow-hidden whitespace-pre-wrap break-words px-3 py-2 text-sm sm:px-4',
                     isEditing ? 'opacity-0' : '',
                   )}
                 >
-                  <span className="break-all">{input}</span>
+                  <span>{input}</span>
                   <br />
                 </div>
               </div>
             )}
             {((hovering &&
-              (message.content.text || message.siblings.length > 1)) ||
+              (onEdit ||
+                message.content.text ||
+                (updateConversation && message.siblings.length > 1))) ||
               isEditing) && (
               <div className="absolute bottom-[-1.5rem] right-2 flex items-center gap-0.5 rounded-sm border border-adam-neutral-700 bg-adam-bg-secondary-dark p-0.5">
                 {!isEditing ? (
                   <>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className={cn(
-                            'h-6 w-6 rounded-sm p-0',
-                            isLoading
-                              ? 'cursor-not-allowed opacity-50'
-                              : 'hover:bg-adam-neutral-800',
-                          )}
-                          onClick={() => {
-                            setIsEditing(true);
-                          }}
-                          disabled={isLoading}
-                        >
-                          <Pencil className="h-3 w-3 p-0 text-adam-neutral-100" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Edit</TooltipContent>
-                    </Tooltip>
-                    <Separator
-                      orientation="vertical"
-                      className="h-4 bg-adam-neutral-700"
-                    />
+                    {onEdit && (
+                      <>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={cn(
+                                'h-6 w-6 rounded-sm p-0',
+                                limitReached || isLoading
+                                  ? 'cursor-not-allowed opacity-50'
+                                  : 'hover:bg-adam-neutral-800',
+                              )}
+                              onClick={() => {
+                                setIsEditing(true);
+                              }}
+                              disabled={limitReached || isLoading}
+                            >
+                              <Pencil className="h-3 w-3 p-0 text-adam-neutral-100" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Edit</TooltipContent>
+                        </Tooltip>
+                        <Separator
+                          orientation="vertical"
+                          className="h-4 bg-adam-neutral-700"
+                        />
+                      </>
+                    )}
                     {message.content.text && (
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -217,7 +235,7 @@ export function UserMessage({ message, isLoading }: UserMessageProps) {
                         <TooltipContent>Copy Prompt</TooltipContent>
                       </Tooltip>
                     )}
-                    {message.siblings.length > 1 && (
+                    {updateConversation && message.siblings.length > 1 && (
                       <>
                         <Separator
                           orientation="vertical"
@@ -313,6 +331,49 @@ function BranchNavigation({
   );
 }
 
+function UserMessageMeshViewer({ message }: { message: Message }) {
+  const { currentMessage, setCurrentMessage } = useCurrentMessage();
+
+  if (!message.content.mesh) {
+    return null;
+  }
+
+  return (
+    <div className="relative">
+      <div
+        onClick={() => {
+          if (
+            currentMessage &&
+            message.id === currentMessage?.id &&
+            currentMessage?.content.mesh === message.content.mesh
+          ) {
+            setCurrentMessage(null);
+          } else {
+            // Only set the mesh part of the message, not the images
+            setCurrentMessage({
+              ...message,
+              content: {
+                mesh: message.content.mesh,
+              },
+            });
+          }
+        }}
+        className={cn(
+          'h-24 w-24 cursor-pointer overflow-hidden rounded-md',
+          currentMessage?.id === message.id &&
+            currentMessage?.content.mesh === message.content.mesh &&
+            'outline outline-2 outline-adam-blue',
+        )}
+      >
+        <MeshImagePreview meshId={message.content.mesh.id} />
+        <div className="absolute bottom-1 right-1 rounded-full border border-adam-neutral-500 bg-adam-neutral-500 text-white transition-colors duration-200 hover:border-adam-neutral-700 hover:bg-adam-neutral-700">
+          <Box className="h-4 w-4 text-white" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * UserMessageImagesViewer is a component that displays a grid of images from a message.
  * It's used within UserMessage to show any images attached to a user's message.
@@ -327,6 +388,7 @@ function BranchNavigation({
  */
 export function UserMessageImagesViewer({ message }: { message: Message }) {
   const { currentMessage, setCurrentMessage } = useCurrentMessage();
+  const isMobile = useIsMobile();
 
   if (!message.content.images) {
     return null;
@@ -345,7 +407,7 @@ export function UserMessageImagesViewer({ message }: { message: Message }) {
             ) {
               setCurrentMessage(null);
             } else {
-              // Only set the images part of the message
+              // Only set the images part of the message, not the mesh
               setCurrentMessage({
                 ...message,
                 content: {
@@ -359,6 +421,7 @@ export function UserMessageImagesViewer({ message }: { message: Message }) {
         >
           <ImageViewer
             image={image}
+            clickable={!isMobile}
             className={cn(
               'aspect-square cursor-pointer',
               currentMessage?.id === message.id &&
