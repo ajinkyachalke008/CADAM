@@ -91,6 +91,7 @@ interface AssistantMessageProps {
 }
 
 const paymentRequiredMessages = {
+  insufficient_tokens: <InsufficientTokensMessage />,
   trial_user_E9ueHIgpei2JvFUDeJLEnwzDhy7GF38a: <TrialUserMessage />,
   free_user_E9ueHIgpei2JvFUDeJLEnwzDhy7GF38a: <FreeUserMessage />,
   limit_reached_E9ueHIgpei2JvFUDeJLEnwzDhy7GF38a: <LimitReachedMessage />,
@@ -574,6 +575,28 @@ function ImageLimitReachedMessage() {
         Upgrade
       </Link>{' '}
       for more image generations :)
+    </span>
+  );
+}
+
+function InsufficientTokensMessage() {
+  const { subscription } = useAuth();
+  return (
+    <span>
+      You don't have enough tokens for this operation.{' '}
+      <Link to="/settings" className="text-adam-blue hover:underline">
+        Buy more tokens
+      </Link>
+      {subscription === 'free' && (
+        <>
+          {' '}
+          or{' '}
+          <Link to="/subscription" className="text-adam-blue hover:underline">
+            upgrade your plan
+          </Link>
+        </>
+      )}
+      .
     </span>
   );
 }

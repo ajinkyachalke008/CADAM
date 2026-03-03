@@ -50,11 +50,15 @@ function LimitReachedSpan({ onTrialClick }: { onTrialClick?: () => void }) {
   if (subscription === 'free' && hasTrialed) {
     return (
       <span>
-        You have reached the limit of 3 daily 3D generations.{' '}
+        You've used all your tokens.{' '}
         <Link to="/subscription" className="text-adam-blue hover:underline">
           Upgrade
         </Link>{' '}
-        to a paid plan for higher limits.
+        for more tokens, or{' '}
+        <Link to="/settings" className="text-adam-blue hover:underline">
+          buy a token pack
+        </Link>
+        .
       </span>
     );
   }
@@ -63,7 +67,7 @@ function LimitReachedSpan({ onTrialClick }: { onTrialClick?: () => void }) {
   if (subscription === 'free' && !hasTrialed) {
     return (
       <span>
-        You have reached the limit of 3 daily 3D generations.{' '}
+        You've used all your tokens.{' '}
         <span
           className="cursor-pointer text-adam-blue hover:underline"
           onClick={onTrialClick}
@@ -75,26 +79,18 @@ function LimitReachedSpan({ onTrialClick }: { onTrialClick?: () => void }) {
     );
   }
 
-  // Standard tier
-  if (subscription === 'standard') {
-    return (
-      <span>
-        You have reached the limit of 100 monthly 3D generations. Please upgrade
-        to{' '}
-        <Link to="/subscription" className="text-adam-blue hover:underline">
-          Pro
-        </Link>{' '}
-        for unlimited 3D generations :)
-      </span>
-    );
-  }
-
-  // Pro tier
+  // Standard or Pro tier
   return (
     <span>
-      You've somehow reached the unlimited generation limit! Please contact us
-      through the feedback form if you see this message as it shouldn't be
-      possible.
+      You've used all your tokens for this period.{' '}
+      <Link to="/settings" className="text-adam-blue hover:underline">
+        Buy more tokens
+      </Link>{' '}
+      or{' '}
+      <Link to="/subscription" className="text-adam-blue hover:underline">
+        upgrade your plan
+      </Link>
+      .
     </span>
   );
 }

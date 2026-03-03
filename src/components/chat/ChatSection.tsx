@@ -64,7 +64,7 @@ export function ChatSection({
   const isMobile = useIsMobile();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { conversation, updateConversation } = useConversation();
-  const { session, generationsRemaining } = useAuth();
+  const { session, totalTokens } = useAuth();
   const navigate = useNavigate();
 
   const scrollToBottom = useCallback(() => {
@@ -83,18 +83,12 @@ export function ChatSection({
     (conversation.type === 'parametric' ? 'fast' : 'quality');
 
   const lowPrompts = useMemo(() => {
-    if (conversation.type === 'creative') {
-      return generationsRemaining <= 5;
-    }
-    return false; // Temporarily disabled - never show low prompts for parametric
-  }, [conversation.type, generationsRemaining]);
+    return totalTokens > 0 && totalTokens <= 10;
+  }, [totalTokens]);
 
   const limitReached = useMemo(() => {
-    if (conversation.type === 'creative') {
-      return generationsRemaining <= 0;
-    }
-    return false; // Temporarily disabled - never show limit reached for parametric
-  }, [conversation.type, generationsRemaining]);
+    return totalTokens <= 0;
+  }, [totalTokens]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -271,7 +265,7 @@ export function ChatSection({
           {session && session.user && limitReached && <LimitReachedMessage />}
           {session && session.user && lowPrompts && !limitReached && (
             <LowPromptsWarningMessage
-              promptsRemaining={generationsRemaining}
+              tokensRemaining={totalTokens}
               layout="stacked"
             />
           )}

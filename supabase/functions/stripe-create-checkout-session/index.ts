@@ -1,6 +1,6 @@
 // Setup type definitions for built-in Supabase Runtime APIs
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
-import Stripe from 'npm:stripe@17.5.0';
+import '@supabase/functions-js/edge-runtime.d.ts';
+import Stripe from 'stripe';
 import { corsHeaders } from '../_shared/cors.ts';
 import { getAnonSupabaseClient } from '../_shared/supabaseClient.ts';
 import { initSentry, logError, logApiError } from '../_shared/sentry.ts';
@@ -34,8 +34,15 @@ Deno.serve(async (req) => {
   const { data: userData, error: userError } =
     await supabaseClient.auth.getUser();
 
-  const { lookupKey, trial }: { lookupKey: string; trial: boolean } =
-    await req.json();
+  const {
+    lookupKey,
+    trial,
+    mode,
+  }: {
+    lookupKey: string;
+    trial: boolean;
+    mode?: 'subscription' | 'token_pack';
+  } = await req.json();
 
   if (!userData.user) {
     logError(new Error('No user found in token'), {
@@ -103,7 +110,12 @@ Deno.serve(async (req) => {
     });
   }
 
-  if (subscriptionData && subscriptionData.stripe_customer_id) {
+  // For subscription-related requests, redirect existing subscribers to billing portal
+  if (
+    mode !== 'token_pack' &&
+    subscriptionData &&
+    subscriptionData.stripe_customer_id
+  ) {
     const session = await stripe.billingPortal.sessions.create({
       return_url: Deno.env.get('ADAM_URL') ?? 'https://adam.new/app',
       customer: subscriptionData.stripe_customer_id,
@@ -128,22 +140,26 @@ Deno.serve(async (req) => {
     });
   }
 
-  let customerId = '';
+  // Resolve Stripe customer ID: use existing from subscription, or find/create
+  let customerId = subscriptionData?.stripe_customer_id ?? '';
 
-  const customer = await stripe.customers.list({ email });
+  if (!customerId) {
+    const customer = await stripe.customers.list({ email });
 
-  if (customer.data.length === 0) {
-    const newCustomer = await stripe.customers.create({
-      name: profileData.full_name,
-      email,
-      metadata: { user_id: userData.user.id },
-    });
+    if (customer.data.length === 0) {
+      const newCustomer = await stripe.customers.create({
+        name: profileData.full_name,
+        email,
+        metadata: { user_id: userData.user.id },
+      });
 
-    customerId = newCustomer.id;
-  } else {
-    customerId = customer.data[0].id;
+      customerId = newCustomer.id;
+    } else {
+      customerId = customer.data[0].id;
+    }
   }
 
+  // Resolve price via lookup key (used for both subscriptions and token packs)
   const price = await stripe.prices.list({ lookup_keys: [lookupKey] });
 
   if (price.data.length === 0) {
@@ -159,11 +175,38 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Handle token pack one-time purchases
+  if (mode === 'token_pack') {
+    const tokenPackSession = await stripe.checkout.sessions.create({
+      line_items: [{ price: price.data[0].id, quantity: 1 }],
+      mode: 'payment',
+      success_url: Deno.env.get('ADAM_URL') ?? 'https://adam.new/app',
+      cancel_url: Deno.env.get('ADAM_URL') ?? 'https://adam.new/app',
+      customer: customerId,
+      client_reference_id: userData.user.id,
+    });
+
+    if (!tokenPackSession.url) {
+      logApiError(new Error('No session URL in token pack checkout response'), {
+        functionName: 'stripe-create-checkout-session',
+        apiName: 'Stripe checkout session (token pack)',
+        statusCode: 500,
+        userId: userData.user?.id,
+        requestData: { customerId, lookupKey },
+      });
+      return new Response(JSON.stringify({ error: 'No session URL' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ url: tokenPackSession.url }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   const level =
-    lookupKey === 'pro_monthly' ||
-    lookupKey === 'pro_yearly' ||
-    lookupKey === 'pro_monthly_variant' ||
-    lookupKey === 'pro_yearly_variant'
+    lookupKey === 'pro_monthly' || lookupKey === 'pro_yearly'
       ? 'pro'
       : 'standard';
 

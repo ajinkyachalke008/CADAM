@@ -7,7 +7,10 @@ import {
   ParametricArtifact,
   ToolCall,
 } from '@shared/types.ts';
-import { getAnonSupabaseClient } from '../_shared/supabaseClient.ts';
+import {
+  getAnonSupabaseClient,
+  getServiceRoleSupabaseClient,
+} from '../_shared/supabaseClient.ts';
 import Tree from '@shared/Tree.ts';
 import parseParameters from '../_shared/parseParameter.ts';
 import { formatUserMessage } from '../_shared/messageUtils.ts';
@@ -422,6 +425,42 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Deduct chat token (1) at request start
+  const serviceClient = getServiceRoleSupabaseClient();
+  const { data: rawChatTokenResult, error: chatTokenError } =
+    await serviceClient.rpc('deduct_tokens', {
+      p_user_id: userData.user.id,
+      p_operation: 'chat',
+    });
+
+  const chatTokenResult = rawChatTokenResult as {
+    success: boolean;
+    tokensRequired?: number;
+    tokensAvailable?: number;
+  } | null;
+
+  if (chatTokenError || !chatTokenResult?.success) {
+    const insufficientTokens = chatTokenResult && !chatTokenResult.success;
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: insufficientTokens
+            ? 'insufficient_tokens'
+            : chatTokenError?.message || 'Token deduction failed',
+          code: 'insufficient_tokens',
+          ...(insufficientTokens && {
+            tokensRequired: chatTokenResult.tokensRequired,
+            tokensAvailable: chatTokenResult.tokensAvailable,
+          }),
+        },
+      }),
+      {
+        status: 402,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
   const {
     messageId,
     conversationId,
@@ -804,6 +843,28 @@ Deno.serve(async (req) => {
           arguments: string;
         }) {
           if (toolCall.name === 'build_parametric_model') {
+            // Deduct parametric tokens (5) for model building
+            const { data: rawParamTokenResult } = await serviceClient.rpc(
+              'deduct_tokens',
+              {
+                p_user_id: userData.user!.id,
+                p_operation: 'parametric',
+                p_reference_id: toolCall.id,
+              },
+            );
+
+            const paramTokenResult = rawParamTokenResult as {
+              success: boolean;
+            } | null;
+
+            if (!paramTokenResult?.success) {
+              content = {
+                ...content,
+                error: 'insufficient_tokens',
+              };
+              streamMessage(controller, { ...newMessageData, content });
+              return;
+            }
             let toolInput: {
               text?: string;
               imageIds?: string[];

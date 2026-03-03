@@ -12,6 +12,7 @@ import {
 } from '@shared/types.ts';
 import {
   getAnonSupabaseClient,
+  getServiceRoleSupabaseClient,
   SupabaseClient,
 } from '../_shared/supabaseClient.ts';
 import Tree from '@shared/Tree.ts';
@@ -214,46 +215,27 @@ async function formatAssistantMessage(
   return messages;
 }
 
-const systemPrompt = `You are a helpful and quirky assistant called "Adam" whose primary purpose is to create images and meshes. 
-  You can use the create_image and create_mesh tools to create images and meshes. 
+const systemPrompt = `You are a helpful and quirky assistant called "Adam" whose primary purpose is to create 3D meshes.
+  You can use the create_mesh tool to create 3D meshes.
 
   Your mission is to speak things into existence. You are fun, playful, nerdy and a little bit silly.
-  
-  Should you be asked to do something that is not related to creating images or meshes, 
-  you should politely decline and say that you are not able to do that. 
-  
+
+  Should you be asked to do something that is not related to creating 3D meshes,
+  you should politely decline and say that you are not able to do that.
+
   Should you be asked to make something more suited for parametric CAD design than mesh modelling (i.e with measurements/dimensional requirements or a specific hardware part) ALWAYS instruct the user that they should try parametric mode to get the best results.
-  
-  Additionally, because your purpose is to create images and meshes, 
-  your text answers should be concise and to the point, 
-  never more than one or two sentences. 
-  
-  You can modify the users prompt to make it better for the tool to use, 
-  but you should not change the users intent. 
-  
-  You may ask follow up questions to clarify the users intent, 
-  but you should not ask more than 2 follow up questions.
-  
-  You should strongly prefer to use the create_mesh tool over the create_image tool.
-  Only use the create_image tool if the user asks specifically for an image.`;
+
+  Additionally, because your purpose is to create 3D meshes,
+  your text answers should be concise and to the point,
+  never more than one or two sentences.
+
+  You can modify the users prompt to make it better for the tool to use,
+  but you should not change the users intent.
+
+  You may ask follow up questions to clarify the users intent,
+  but you should not ask more than 2 follow up questions.`;
 
 const tools: Anthropic.Messages.ToolUnion[] = [
-  {
-    name: 'create_image',
-    description:
-      'When given just a text prompt, creates an image from that text prompt. When given an array of image ids, creates variations of those images. When given both, modifies the images with the text prompt.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        text: { type: 'string', optional: true },
-        imageIds: {
-          type: 'array',
-          items: { type: 'string' },
-          optional: true,
-        },
-      },
-    },
-  },
   {
     name: 'create_mesh',
     description:
@@ -386,6 +368,42 @@ Deno.serve(async (req) => {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
+  }
+
+  // Deduct chat token (1) at request start
+  const serviceClient = getServiceRoleSupabaseClient();
+  const { data: rawChatTokenResult, error: chatTokenError } =
+    await serviceClient.rpc('deduct_tokens', {
+      p_user_id: userData.user.id,
+      p_operation: 'chat',
+    });
+
+  const chatTokenResult = rawChatTokenResult as {
+    success: boolean;
+    tokensRequired?: number;
+    tokensAvailable?: number;
+  } | null;
+
+  if (chatTokenError || !chatTokenResult?.success) {
+    const insufficientTokens = chatTokenResult && !chatTokenResult.success;
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: insufficientTokens
+            ? 'insufficient_tokens'
+            : chatTokenError?.message || 'Token deduction failed',
+          code: 'insufficient_tokens',
+          ...(insufficientTokens && {
+            tokensRequired: chatTokenResult.tokensRequired,
+            tokensAvailable: chatTokenResult.tokensAvailable,
+          }),
+        },
+      }),
+      {
+        status: 402,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      },
+    );
   }
 
   const supabaseHost =
@@ -624,73 +642,7 @@ Deno.serve(async (req) => {
               }
             } else if (chunk.type === 'content_block_stop') {
               if (currentToolUse) {
-                if (currentToolUse.name === 'create_image') {
-                  let toolInput: { text?: string; imageIds?: string[] } = {};
-                  try {
-                    toolInput = currentToolUse.input
-                      ? JSON.parse(currentToolUse.input)
-                      : {};
-                  } catch (error) {
-                    console.error('Error parsing tool input JSON:', error);
-                    content = {
-                      ...content,
-                      toolCalls: content.toolCalls?.map((toolCall) =>
-                        toolCall.id === currentToolUse?.id
-                          ? { ...toolCall, status: 'error' }
-                          : toolCall,
-                      ),
-                    };
-                    streamMessage(controller, {
-                      ...newMessageData,
-                      content: content,
-                    });
-                    continue;
-                  }
-
-                  const result = await fetch(
-                    `${supabaseHost}/functions/v1/images`,
-                    {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: req.headers.get('Authorization') ?? '',
-                      },
-                      body: JSON.stringify({
-                        conversationId: conversationId,
-                        text: toolInput.text,
-                        images: toolInput.imageIds,
-                        model: model,
-                      }),
-                      signal: abortSignal,
-                    },
-                  );
-
-                  const data = await result.json();
-
-                  if (result.ok) {
-                    content = {
-                      ...content,
-                      toolCalls:
-                        content.toolCalls?.filter(
-                          (toolCall) => toolCall.id !== currentToolUse?.id,
-                        ) || [],
-                      images: [data.id],
-                    };
-                  } else {
-                    content = {
-                      ...content,
-                      toolCalls: content.toolCalls?.map((toolCall) =>
-                        toolCall.id === currentToolUse?.id
-                          ? { ...toolCall, status: 'error' }
-                          : toolCall,
-                      ),
-                    };
-                  }
-                  streamMessage(controller, {
-                    ...newMessageData,
-                    content: content,
-                  });
-                } else if (currentToolUse.name === 'create_mesh') {
+                if (currentToolUse.name === 'create_mesh') {
                   debugLog('=== CREATIVE-CHAT: CREATE_MESH TOOL CALLED ===');
                   debugLog('Creative-chat: create_mesh tool called', {
                     toolUseId: currentToolUse.id,
@@ -780,8 +732,7 @@ Deno.serve(async (req) => {
 
                     if (result.status === 402) {
                       content = {
-                        error:
-                          'limit_reached_mesh_E9ueHIgpei2JvFUDeJLEnwzDhy7GF38a',
+                        error: 'insufficient_tokens',
                       };
                     } else {
                       content = {
