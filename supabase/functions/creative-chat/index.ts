@@ -370,41 +370,12 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Deduct chat token (1) at request start
-  const serviceClient = getServiceRoleSupabaseClient();
-  const { data: rawChatTokenResult, error: chatTokenError } =
-    await serviceClient.rpc('deduct_tokens', {
-      p_user_id: userData.user.id,
-      p_operation: 'chat',
-    });
-
-  const chatTokenResult = rawChatTokenResult as {
+  // Token deduction bypassed for local development
+  const chatTokenResult = { success: true } as {
     success: boolean;
     tokensRequired?: number;
     tokensAvailable?: number;
   } | null;
-
-  if (chatTokenError || !chatTokenResult?.success) {
-    const insufficientTokens = chatTokenResult && !chatTokenResult.success;
-    return new Response(
-      JSON.stringify({
-        error: {
-          message: insufficientTokens
-            ? 'insufficient_tokens'
-            : chatTokenError?.message || 'Token deduction failed',
-          code: 'insufficient_tokens',
-          ...(insufficientTokens && {
-            tokensRequired: chatTokenResult.tokensRequired,
-            tokensAvailable: chatTokenResult.tokensAvailable,
-          }),
-        },
-      }),
-      {
-        status: 402,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      },
-    );
-  }
 
   const supabaseHost =
     (Deno.env.get('ENVIRONMENT') === 'local'

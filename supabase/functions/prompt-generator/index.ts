@@ -1,13 +1,11 @@
-// Follow this setup guide to integrate the Deno language server with your editor:
-// https://deno.land/manual/getting_started/setup_your_environment
-// This enables autocomplete, go to definition, etc.
-
 // Setup type definitions for built-in Supabase Runtime APIs
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
-import { Anthropic } from 'npm:@anthropic-ai/sdk';
 import { corsHeaders } from '../_shared/cors.ts';
 import 'jsr:@std/dotenv/load';
 import { getAnonSupabaseClient } from '../_shared/supabaseClient.ts';
+
+const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const NVIDIA_API_KEY = Deno.env.get('NVIDIA_API_KEY') ?? '';
 
 const PROMPT_SYSTEM_PROMPT = `You are a helpful assistant that generates creative prompts for organic 3D forms and artistic objects. Your prompts should be:
 1. Focus on organic shapes, characters, figurines, and artistic forms
@@ -104,11 +102,6 @@ Deno.serve(async (req) => {
     .json()
     .catch(() => ({}));
 
-  // Initialize Anthropic client for AI interactions
-  const anthropic = new Anthropic({
-    apiKey: Deno.env.get('ANTHROPIC_API_KEY') ?? '',
-  });
-
   try {
     let systemPrompt: string;
     let userPrompt: string;
@@ -164,26 +157,35 @@ Return only the enhanced prompt text, no introductory phrases.`;
       }
     }
 
-    // Configure Claude API call
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 200,
-      system: systemPrompt,
-      messages: [
-        {
-          role: 'user',
-          content: userPrompt,
-        },
-      ],
+    // Use NVIDIA NIM API instead of Anthropic
+    const response = await fetch(NVIDIA_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${NVIDIA_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'meta/llama-3.3-70b-instruct',
+        max_tokens: 200,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      }),
     });
+
+    if (!response.ok) {
+      throw new Error(`NVIDIA API error: ${response.status}`);
+    }
+
+    const data = await response.json();
 
     // Extract prompt from response
     let prompt = '';
-    if (Array.isArray(response.content) && response.content.length > 0) {
-      const lastContent = response.content[response.content.length - 1];
-      if (lastContent.type === 'text') {
-        prompt = lastContent.text.trim();
-      }
+    if (data.choices?.[0]?.message?.content) {
+      prompt = data.choices[0].message.content.trim();
+      // Remove any surrounding quotes
+      prompt = prompt.replace(/^["']|["']$/g, '');
     }
 
     return new Response(JSON.stringify({ prompt }), {
@@ -191,7 +193,7 @@ Return only the enhanced prompt text, no introductory phrases.`;
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    console.error('Error calling Claude:', error);
+    console.error('Error generating prompt:', error);
 
     return new Response(
       JSON.stringify({

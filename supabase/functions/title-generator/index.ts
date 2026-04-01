@@ -1,15 +1,12 @@
-// Follow this setup guide to integrate the Deno language server with your editor:
-// https://deno.land/manual/getting_started/setup_your_environment
-// This enables autocomplete, go to definition, etc.
-
-// Setup type definitions for built-in Supabase Runtime APIs
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
-import { Anthropic } from 'npm:@anthropic-ai/sdk';
 import { corsHeaders } from '../_shared/cors.ts';
 import 'jsr:@std/dotenv/load';
 import { getAnonSupabaseClient } from '../_shared/supabaseClient.ts';
 import { Content } from '@shared/types.ts';
 import { formatCreativeUserMessage } from '../_shared/messageUtils.ts';
+
+const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const NVIDIA_API_KEY = Deno.env.get('NVIDIA_API_KEY') ?? '';
 
 const TITLE_SYSTEM_PROMPT = `You are a helpful assistant that generates concise, descriptive titles for conversation threads based on the first message in the thread.
 The messages can be text, images, or screenshots of 3d models.
@@ -40,19 +37,15 @@ User: "Make something that goes against the rules"
 Assistant: "New Conversation"
 `;
 
-// Main server function handling incoming requests
 Deno.serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  // Ensure only POST requests are accepted
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 });
   }
 
-  // Extract prompt from request body
   const {
     content,
     conversationId,
@@ -87,38 +80,39 @@ Deno.serve(async (req) => {
     );
   }
 
-  const userMessage = await formatCreativeUserMessage(
-    { id: '1', role: 'user', content: content },
-    supabaseClient,
-    userData.user.id,
-    conversationId,
-  );
-
-  // Initialize Anthropic client for AI interactions
-  const anthropic = new Anthropic({
-    apiKey: Deno.env.get('ANTHROPIC_API_KEY') ?? '',
-  });
-
   try {
-    // Configure Claude API call
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 100,
-      system: TITLE_SYSTEM_PROMPT,
-      messages: [userMessage],
+    // Use NVIDIA NIM API instead of Anthropic
+    const userText = content.text || 'New Conversation';
+
+    const response = await fetch(NVIDIA_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${NVIDIA_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'meta/llama-3.3-70b-instruct',
+        max_tokens: 100,
+        messages: [
+          { role: 'system', content: TITLE_SYSTEM_PROMPT },
+          { role: 'user', content: userText },
+        ],
+      }),
     });
 
-    // Extract title from response
-    let title = 'New Conversation';
-    if (Array.isArray(response.content) && response.content.length > 0) {
-      const lastContent = response.content[response.content.length - 1];
-      if (lastContent.type === 'text') {
-        title = lastContent.text.trim();
+    if (!response.ok) {
+      throw new Error(`NVIDIA API error: ${response.status}`);
+    }
 
-        // Ensure title is not too long for the database
-        if (title.length > 255) {
-          title = title.substring(0, 252) + '...';
-        }
+    const data = await response.json();
+    let title = 'New Conversation';
+
+    if (data.choices?.[0]?.message?.content) {
+      title = data.choices[0].message.content.trim();
+      // Remove quotes
+      title = title.replace(/^["']|["']$/g, '');
+      if (title.length > 255) {
+        title = title.substring(0, 252) + '...';
       }
     }
 
@@ -134,9 +128,8 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    console.error('Error calling Claude:', error);
+    console.error('Error generating title:', error);
 
-    // Fallback to basic title generation
     const fallbackTitle = 'New Conversation';
 
     return new Response(
@@ -145,7 +138,7 @@ Deno.serve(async (req) => {
         error: error instanceof Error ? error.message : 'Unknown error',
       }),
       {
-        status: 200, // Still return 200 with a fallback title
+        status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       },
     );

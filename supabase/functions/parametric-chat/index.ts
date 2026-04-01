@@ -16,9 +16,9 @@ import parseParameters from '../_shared/parseParameter.ts';
 import { formatUserMessage } from '../_shared/messageUtils.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 
-// OpenRouter API configuration
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY') ?? '';
+// NVIDIA API configuration
+const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const NVIDIA_API_KEY = Deno.env.get('NVIDIA_API_KEY') ?? '';
 
 // Helper to stream updated assistant message rows
 function streamMessage(
@@ -184,16 +184,14 @@ async function generateTitleFromMessages(
 - No quotes or special formatting
 - Examples: "Coffee Mug", "Gear Assembly", "Phone Stand"`;
 
-    const response = await fetch(OPENROUTER_API_URL, {
+    const response = await fetch(NVIDIA_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        'HTTP-Referer': 'https://adam-cad.com',
-        'X-Title': 'Adam CAD',
+        Authorization: `Bearer ${NVIDIA_API_KEY}`,
       },
       body: JSON.stringify({
-        model: 'anthropic/claude-3.5-haiku',
+        model: 'meta/llama-3.3-70b-instruct',
         max_tokens: 30,
         messages: [
           { role: 'system', content: titleSystemPrompt },
@@ -425,41 +423,10 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Deduct chat token (1) at request start
-  const serviceClient = getServiceRoleSupabaseClient();
-  const { data: rawChatTokenResult, error: chatTokenError } =
-    await serviceClient.rpc('deduct_tokens', {
-      p_user_id: userData.user.id,
-      p_operation: 'chat',
-    });
-
-  const chatTokenResult = rawChatTokenResult as {
-    success: boolean;
-    tokensRequired?: number;
-    tokensAvailable?: number;
-  } | null;
-
-  if (chatTokenError || !chatTokenResult?.success) {
-    const insufficientTokens = chatTokenResult && !chatTokenResult.success;
-    return new Response(
-      JSON.stringify({
-        error: {
-          message: insufficientTokens
-            ? 'insufficient_tokens'
-            : chatTokenError?.message || 'Token deduction failed',
-          code: 'insufficient_tokens',
-          ...(insufficientTokens && {
-            tokensRequired: chatTokenResult.tokensRequired,
-            tokensAvailable: chatTokenResult.tokensAvailable,
-          }),
-        },
-      }),
-      {
-        status: 402,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      },
-    );
-  }
+  // Token deduction bypassed for local development
+  // const serviceClient = getServiceRoleSupabaseClient();
+  // const { data: rawChatTokenResult, error: chatTokenError } = ...
+  const chatTokenResult = { success: true } as { success: boolean; tokensRequired?: number; tokensAvailable?: number } | null;
 
   const {
     messageId,
@@ -597,33 +564,23 @@ Deno.serve(async (req) => {
 
     // Prepare request body
     const requestBody: OpenRouterRequest = {
-      model,
+      model: 'meta/llama-3.3-70b-instruct',
       messages: [
         { role: 'system', content: PARAMETRIC_AGENT_PROMPT },
         ...messagesToSend,
       ],
       tools,
       stream: true,
-      max_tokens: 16000,
+      max_tokens: 4096,
     };
 
-    // Add reasoning/thinking parameter if requested and supported
-    // OpenRouter uses a unified 'reasoning' parameter
-    if (thinking) {
-      requestBody.reasoning = {
-        max_tokens: 12000,
-      };
-      // Ensure total max_tokens is high enough to accommodate reasoning + output
-      requestBody.max_tokens = 20000;
-    }
+    // NVIDIA NIM does not support reasoning parameter.
 
-    const response = await fetch(OPENROUTER_API_URL, {
+    const response = await fetch(NVIDIA_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        'HTTP-Referer': 'https://adam-cad.com',
-        'X-Title': 'Adam CAD',
+        Authorization: `Bearer ${NVIDIA_API_KEY}`,
       },
       body: JSON.stringify(requestBody),
     });
@@ -843,19 +800,8 @@ Deno.serve(async (req) => {
           arguments: string;
         }) {
           if (toolCall.name === 'build_parametric_model') {
-            // Deduct parametric tokens (5) for model building
-            const { data: rawParamTokenResult } = await serviceClient.rpc(
-              'deduct_tokens',
-              {
-                p_user_id: userData.user!.id,
-                p_operation: 'parametric',
-                p_reference_id: toolCall.id,
-              },
-            );
-
-            const paramTokenResult = rawParamTokenResult as {
-              success: boolean;
-            } | null;
+            // Token deduction bypassed for local development
+            const paramTokenResult = { success: true } as { success: boolean } | null;
 
             if (!paramTokenResult?.success) {
               content = {
@@ -907,30 +853,22 @@ Deno.serve(async (req) => {
 
             // Code generation request logic
             const codeRequestBody: OpenRouterRequest = {
-              model,
+              model: 'meta/llama-3.3-70b-instruct',
               messages: [
                 { role: 'system', content: STRICT_CODE_PROMPT },
                 ...codeMessages,
               ],
-              max_tokens: 16000,
+              max_tokens: 4096,
             };
 
-            // Also apply thinking to code generation if enabled
-            if (thinking) {
-              codeRequestBody.reasoning = {
-                max_tokens: 12000,
-              };
-              codeRequestBody.max_tokens = 20000;
-            }
-
+            // NVIDIA NIM does not support reasoning parameter.
+            
             const [codeResult, titleResult] = await Promise.allSettled([
-              fetch(OPENROUTER_API_URL, {
+              fetch(NVIDIA_API_URL, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-                  'HTTP-Referer': 'https://adam-cad.com',
-                  'X-Title': 'Adam CAD',
+                  Authorization: `Bearer ${NVIDIA_API_KEY}`,
                 },
                 body: JSON.stringify(codeRequestBody),
               }).then(async (r) => {

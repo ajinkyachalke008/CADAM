@@ -1,4 +1,4 @@
-import { RefreshCcw, Download, ChevronUp } from 'lucide-react';
+import { RefreshCcw, Download, ChevronUp, Loader2 } from 'lucide-react';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -13,13 +13,32 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ParameterInput } from '@/components/parameter/ParameterInput';
 import { ColorPicker } from '@/components/parameter/ColorPicker';
 import { validateParameterValue } from '@/utils/parameterUtils';
 import { useCurrentMessage } from '@/contexts/CurrentMessageContext';
-import { downloadSTLFile, downloadOpenSCADFile } from '@/utils/downloadUtils';
+import {
+  downloadSTLFile,
+  downloadOpenSCADFile,
+  downloadOBJFile,
+  downloadGLBFile,
+  downloadPLYFile,
+  downloadDXFFile,
+} from '@/utils/downloadUtils';
+
+type DownloadFormat = 'stl' | 'scad' | 'obj' | 'glb' | 'ply' | 'dxf';
+
+const FORMAT_INFO: Record<DownloadFormat, { label: string; desc: string; needsOutput: boolean; needsCode: boolean }> = {
+  stl:  { label: '.STL',  desc: '3D Printing',       needsOutput: true,  needsCode: false },
+  obj:  { label: '.OBJ',  desc: 'Universal 3D',      needsOutput: true,  needsCode: false },
+  glb:  { label: '.GLB',  desc: 'Modern 3D Apps',     needsOutput: true,  needsCode: false },
+  ply:  { label: '.PLY',  desc: 'Point Cloud / Scan', needsOutput: true,  needsCode: false },
+  dxf:  { label: '.DXF',  desc: 'CAD / CNC',          needsOutput: true,  needsCode: false },
+  scad: { label: '.SCAD', desc: 'OpenSCAD Source',    needsOutput: false, needsCode: true  },
+};
 
 interface ParameterSectionProps {
   parameters: Parameter[];
@@ -37,7 +56,8 @@ export function ParameterSection({
   setColor,
 }: ParameterSectionProps) {
   const { currentMessage } = useCurrentMessage();
-  const [selectedFormat, setSelectedFormat] = useState<'stl' | 'scad'>('stl');
+  const [selectedFormat, setSelectedFormat] = useState<DownloadFormat>('stl');
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Debounce timer for compilation
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -85,28 +105,42 @@ export function ParameterSection({
     debouncedSubmit(updatedParameters);
   };
 
-  const handleDownload = () => {
-    if (selectedFormat === 'stl') {
-      handleDownloadSTL();
-    } else {
-      handleDownloadOpenSCAD();
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    try {
+      switch (selectedFormat) {
+        case 'stl':
+          if (currentOutput) downloadSTLFile(currentOutput, currentMessage);
+          break;
+        case 'scad':
+          if (currentMessage?.content.artifact?.code)
+            downloadOpenSCADFile(currentMessage.content.artifact.code, currentMessage);
+          break;
+        case 'obj':
+          if (currentOutput) await downloadOBJFile(currentOutput, currentMessage);
+          break;
+        case 'glb':
+          if (currentOutput) await downloadGLBFile(currentOutput, currentMessage);
+          break;
+        case 'ply':
+          if (currentOutput) await downloadPLYFile(currentOutput, currentMessage);
+          break;
+        case 'dxf':
+          if (currentOutput) await downloadDXFFile(currentOutput, currentMessage);
+          break;
+      }
+    } catch (error) {
+      console.error(`Error downloading ${selectedFormat}:`, error);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
-  const handleDownloadSTL = () => {
-    if (!currentOutput) return;
-    downloadSTLFile(currentOutput, currentMessage);
-  };
-
-  const handleDownloadOpenSCAD = () => {
-    if (!currentMessage?.content.artifact?.code) return;
-    downloadOpenSCADFile(currentMessage.content.artifact.code, currentMessage);
-  };
-
+  const formatMeta = FORMAT_INFO[selectedFormat];
   const isDownloadDisabled =
-    selectedFormat === 'stl'
-      ? !currentOutput
-      : !currentMessage?.content.artifact?.code;
+    isDownloading ||
+    (formatMeta.needsOutput && !currentOutput) ||
+    (formatMeta.needsCode && !currentMessage?.content.artifact?.code);
 
   return (
     <div className="h-full w-full max-w-full border-l border-gray-200/20 bg-adam-bg-secondary-dark dark:border-gray-800">
@@ -163,8 +197,12 @@ export function ParameterSection({
               aria-label={`download ${selectedFormat.toUpperCase()} file`}
               className="h-12 flex-1 rounded-r-none bg-adam-neutral-50 text-adam-neutral-800 hover:bg-adam-neutral-100 hover:text-adam-neutral-900"
             >
-              <Download className="mr-2 h-4 w-4" />
-              {selectedFormat.toUpperCase()}
+              {isDownloading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              {isDownloading ? 'Exporting...' : selectedFormat.toUpperCase()}
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -180,16 +218,63 @@ export function ParameterSection({
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
-                className="w-64 border-none bg-adam-neutral-800 shadow-md"
+                className="w-72 border-none bg-adam-neutral-800 shadow-md"
               >
+                <div className="px-3 py-2">
+                  <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-adam-text-primary/40">3D Model Formats</span>
+                </div>
                 <DropdownMenuItem
                   onClick={() => setSelectedFormat('stl')}
                   disabled={!currentOutput}
                   className="cursor-pointer text-adam-text-primary"
                 >
-                  <span className="text-sm">.STL</span>
+                  <span className="text-sm font-medium">.STL</span>
                   <span className="ml-3 text-xs text-adam-text-primary/60">
                     3D Printing
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setSelectedFormat('obj')}
+                  disabled={!currentOutput}
+                  className="cursor-pointer text-adam-text-primary"
+                >
+                  <span className="text-sm font-medium">.OBJ</span>
+                  <span className="ml-3 text-xs text-adam-text-primary/60">
+                    Universal 3D
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setSelectedFormat('glb')}
+                  disabled={!currentOutput}
+                  className="cursor-pointer text-adam-text-primary"
+                >
+                  <span className="text-sm font-medium">.GLB</span>
+                  <span className="ml-3 text-xs text-adam-text-primary/60">
+                    Modern 3D Apps
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setSelectedFormat('ply')}
+                  disabled={!currentOutput}
+                  className="cursor-pointer text-adam-text-primary"
+                >
+                  <span className="text-sm font-medium">.PLY</span>
+                  <span className="ml-3 text-xs text-adam-text-primary/60">
+                    Point Cloud / Scan
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-adam-neutral-700" />
+                <div className="px-3 py-2">
+                  <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-adam-text-primary/40">CAD Formats</span>
+                </div>
+                <DropdownMenuItem
+                  onClick={() => setSelectedFormat('dxf')}
+                  disabled={!currentOutput}
+                  className="cursor-pointer text-adam-text-primary"
+                >
+                  <span className="text-sm font-medium">.DXF</span>
+                  <span className="ml-3 text-xs text-adam-text-primary/60">
+                    CAD / CNC
                   </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -197,9 +282,9 @@ export function ParameterSection({
                   disabled={!currentMessage?.content.artifact?.code}
                   className="cursor-pointer text-adam-text-primary"
                 >
-                  <span className="text-sm">.SCAD</span>
+                  <span className="text-sm font-medium">.SCAD</span>
                   <span className="ml-3 text-xs text-adam-text-primary/60">
-                    OpenSCAD Code
+                    OpenSCAD Source
                   </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -210,3 +295,4 @@ export function ParameterSection({
     </div>
   );
 }
+

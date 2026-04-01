@@ -208,13 +208,29 @@ export function PromptView() {
           <div className="mx-auto flex max-w-3xl flex-col items-center justify-center">
             <h1
               className={cn(
-                'mb-8 text-center text-2xl font-medium text-adam-text-primary md:text-3xl lg:text-4xl',
+                'mb-2 text-center text-2xl font-medium text-adam-text-primary md:text-3xl lg:text-4xl',
                 'motion-safe:transition-opacity motion-safe:duration-1000 motion-safe:ease-out',
                 isLoaded ? 'opacity-100' : 'opacity-0',
               )}
             >
               {getTimeBasedGreeting}!
             </h1>
+            <p
+              className={cn(
+                'mb-8 text-center text-sm md:text-base',
+                'motion-safe:transition-opacity motion-safe:duration-1000 motion-safe:delay-300 motion-safe:ease-out',
+                isLoaded ? 'opacity-100' : 'opacity-0',
+              )}
+              style={{
+                background: 'linear-gradient(90deg, #76b900, #3b82f6, #9C4AFF)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                fontWeight: 700,
+                letterSpacing: '0.05em',
+              }}
+            >
+              ✨ Special thank you to AJINKYA ✨
+            </p>
           </div>
           <div className="flex w-full flex-col items-center">
             <div className="w-full max-w-3xl space-y-4 pb-12">
@@ -233,7 +249,7 @@ export function PromptView() {
                       return;
                     }
                   }}
-                  placeholder="Start building with Adam..."
+                  placeholder="Start building with Magic CAD..."
                   type={type}
                   disabled={limitReached}
                   model={model}

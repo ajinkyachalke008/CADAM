@@ -94,15 +94,36 @@ export function OpenSCADPreview({
 
   return (
     <div className="h-full w-full bg-adam-neutral-700/50 shadow-lg backdrop-blur-sm transition-all duration-300 ease-in-out">
-      <div className="h-full w-full">
+    <div className="h-full w-full">
         {geometry ? (
-          <div className="h-full w-full">
+          <div className="relative h-full w-full">
             <ThreeScene
               geometry={geometry}
               color={color}
               isMobile={isMobile}
               backgroundColor={backgroundColor}
             />
+            {/* Powered by EE Zone watermark */}
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 12,
+                right: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                borderRadius: 6,
+                background: 'rgba(0,0,0,0.45)',
+                backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                pointerEvents: 'none',
+                zIndex: 10,
+              }}
+            >
+              <span style={{ fontSize: '0.6rem', color: '#888', letterSpacing: '0.06em' }}>Powered by</span>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, background: 'linear-gradient(90deg, #9C4AFF, #76b900)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>EE ZONE</span>
+            </div>
           </div>
         ) : (
           <>
@@ -150,7 +171,7 @@ function FixWithAIButton({
             Error Compiling Model
           </p>
           <p className="mt-1 text-xs text-adam-text-primary/60">
-            Adam encountered an error while compiling
+            Magic CAD encountered an error while compiling
           </p>
         </div>
       </div>
